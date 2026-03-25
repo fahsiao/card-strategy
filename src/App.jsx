@@ -110,7 +110,6 @@ const statusStyle = (s) => {
   if (s === "review") return { bg: `${C.coral}15`, color: C.coral, label: "Reassess" };
   return { bg: `${UI.text3}15`, color: UI.text3, label: s };
 };
-const fromDB = (row) => ({ id: row.id, label: row.label, value: row.value || 0, color: row.color || UI.text2, sys: row.is_system || false, updated: row.updated_at });
 
 // ── App ──
 
