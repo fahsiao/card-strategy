@@ -125,7 +125,6 @@ export default function App() {
   const [confirmReset, setConfirmReset] = useState(null);
   const [synced, setSynced] = useState(false);
   const skipRef = useRef(false);
-  const skipTurnsRef = useRef(0);
   const tabRef = useRef(null);
   const [pillStyle, setPillStyle] = useState({});
 
@@ -149,7 +148,6 @@ export default function App() {
 
   useEffect(() => {
     const unsub = subscribeTurns((payload) => {
-      if (skipTurnsRef.current > 0) { skipTurnsRef.current--; return; }
       if (payload.eventType === "INSERT") setTurns(prev => [payload.new, ...prev].slice(0, 50));
       if (payload.eventType === "DELETE") setTurns(prev => prev.filter(t => t.id !== payload.old.id));
     });
@@ -178,9 +176,9 @@ export default function App() {
   }, []);
   const addP = useCallback(() => { if (!newN.trim()) return; const item = { id: `c-${Date.now()}`, label: newN.trim(), value: 0, color: UI.text2, sys: false, updated: null }; setProgs(prev => sortProgs([...prev, item])); skipRef.current = true; upsertBalance(item); setNewN(""); setAddOpen(false); }, [newN]);
   const rm = useCallback((id) => { setProgs(prev => prev.filter(x => x.id !== id)); deleteBalance(id); }, []);
-  const handleLog = useCallback(async (bucket, person) => { const entry = { id: `t-${Date.now()}`, bucket, person, paid_at: new Date().toISOString() }; setTurns(prev => [entry, ...prev]); skipTurnsRef.current++; await sbLogTurn(bucket, person); }, []);
-  const handleUndo = useCallback(async (bucket) => { const last = turns.find(t => t.bucket === bucket); if (!last) return; setTurns(prev => prev.filter(t => t.id !== last.id)); skipTurnsRef.current++; await sbDeleteTurn(last.id); }, [turns]);
-  const handleReset = useCallback(async (bucket) => { const ids = turns.filter(t => t.bucket === bucket).map(t => t.id); setTurns(prev => prev.filter(t => t.bucket !== bucket)); skipTurnsRef.current += ids.length; for (const id of ids) await sbDeleteTurn(id); }, [turns]);
+  const handleLog = useCallback(async (bucket, person) => { await sbLogTurn(bucket, person); }, []);
+  const handleUndo = useCallback(async (bucket) => { const last = turns.find(t => t.bucket === bucket); if (!last) return; await sbDeleteTurn(last.id); }, [turns]);
+  const handleReset = useCallback(async (bucket) => { const ids = turns.filter(t => t.bucket === bucket).map(t => t.id); for (const id of ids) await sbDeleteTurn(id); }, [turns]);
   const getTurnCounts = (bucket) => { const bt = turns.filter(t => t.bucket === bucket); const eric = bt.filter(t => t.person === "Eric").length; const christine = bt.filter(t => t.person === "Christine").length; return { eric, christine, diff: Math.abs(eric - christine) }; };
   const getNextPerson = (bucket) => { const c = getTurnCounts(bucket); if (c.eric === 0 && c.christine === 0) return null; if (c.eric === c.christine) return null; return c.eric > c.christine ? "Christine" : "Eric"; };
   const getHistory = (bucket) => turns.filter(t => t.bucket === bucket).slice(0, 5);
