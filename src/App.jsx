@@ -77,7 +77,8 @@ const DEFAULT_PROGS = [
 ];
 const SORT_ORDER = { "ur-e": 0, "ur-c": 1, "mr": 2 };
 const sortProgs = (arr) => [...arr].sort((a, b) => (SORT_ORDER[a.id] ?? 99) - (SORT_ORDER[b.id] ?? 99));
-const fromDB = (row) => ({ id: row.id, label: row.label, value: row.value || 0, color: row.color || UI.text2, sys: row.is_system || false, updated: row.updated_at });
+const SYS_COLORS = { "ur-e": C.chase, "ur-c": C.chase, "mr": C.amex };
+const fromDB = (row) => ({ id: row.id, label: row.label, value: row.value || 0, color: SYS_COLORS[row.id] || row.color || UI.text2, sys: row.is_system || false, updated: row.updated_at });
 
 // ── Helpers ──
 
@@ -124,6 +125,7 @@ export default function App() {
   const [confirmReset, setConfirmReset] = useState(null);
   const [synced, setSynced] = useState(false);
   const skipRef = useRef(false);
+  const skipTurnsRef = useRef(0);
   const tabRef = useRef(null);
   const [pillStyle, setPillStyle] = useState({});
 
@@ -147,21 +149,26 @@ export default function App() {
 
   useEffect(() => {
     const unsub = subscribeTurns((payload) => {
+      if (skipTurnsRef.current > 0) { skipTurnsRef.current--; return; }
       if (payload.eventType === "INSERT") setTurns(prev => [payload.new, ...prev].slice(0, 50));
       if (payload.eventType === "DELETE") setTurns(prev => prev.filter(t => t.id !== payload.old.id));
     });
     return unsub;
   }, []);
 
-  // Animated pill
+  // Animated pill - recalculate after font load
   useEffect(() => {
-    if (!tabRef.current) return;
-    const active = tabRef.current.querySelector(`[data-tab="${tab}"]`);
-    if (active) {
-      const parent = tabRef.current.getBoundingClientRect();
-      const rect = active.getBoundingClientRect();
-      setPillStyle({ left: rect.left - parent.left, width: rect.width, opacity: 1 });
-    }
+    const updatePill = () => {
+      if (!tabRef.current) return;
+      const active = tabRef.current.querySelector(`[data-tab="${tab}"]`);
+      if (active) {
+        const parent = tabRef.current.getBoundingClientRect();
+        const rect = active.getBoundingClientRect();
+        setPillStyle({ left: rect.left - parent.left, width: rect.width, opacity: 1 });
+      }
+    };
+    updatePill();
+    document.fonts?.ready?.then(updatePill);
   }, [tab, loaded]);
 
   const upd = useCallback((id, v) => {
@@ -171,15 +178,15 @@ export default function App() {
   }, []);
   const addP = useCallback(() => { if (!newN.trim()) return; const item = { id: `c-${Date.now()}`, label: newN.trim(), value: 0, color: UI.text2, sys: false, updated: null }; setProgs(prev => sortProgs([...prev, item])); skipRef.current = true; upsertBalance(item); setNewN(""); setAddOpen(false); }, [newN]);
   const rm = useCallback((id) => { setProgs(prev => prev.filter(x => x.id !== id)); deleteBalance(id); }, []);
-  const handleLog = useCallback(async (bucket, person) => { const entry = { id: `t-${Date.now()}`, bucket, person, paid_at: new Date().toISOString() }; setTurns(prev => [entry, ...prev]); await sbLogTurn(bucket, person); }, []);
-  const handleUndo = useCallback(async (bucket) => { const last = turns.find(t => t.bucket === bucket); if (!last) return; setTurns(prev => prev.filter(t => t.id !== last.id)); await sbDeleteTurn(last.id); }, [turns]);
-  const handleReset = useCallback(async (bucket) => { const ids = turns.filter(t => t.bucket === bucket).map(t => t.id); setTurns(prev => prev.filter(t => t.bucket !== bucket)); for (const id of ids) await sbDeleteTurn(id); }, [turns]);
+  const handleLog = useCallback(async (bucket, person) => { const entry = { id: `t-${Date.now()}`, bucket, person, paid_at: new Date().toISOString() }; setTurns(prev => [entry, ...prev]); skipTurnsRef.current++; await sbLogTurn(bucket, person); }, []);
+  const handleUndo = useCallback(async (bucket) => { const last = turns.find(t => t.bucket === bucket); if (!last) return; setTurns(prev => prev.filter(t => t.id !== last.id)); skipTurnsRef.current++; await sbDeleteTurn(last.id); }, [turns]);
+  const handleReset = useCallback(async (bucket) => { const ids = turns.filter(t => t.bucket === bucket).map(t => t.id); setTurns(prev => prev.filter(t => t.bucket !== bucket)); skipTurnsRef.current += ids.length; for (const id of ids) await sbDeleteTurn(id); }, [turns]);
   const getTurnCounts = (bucket) => { const bt = turns.filter(t => t.bucket === bucket); const eric = bt.filter(t => t.person === "Eric").length; const christine = bt.filter(t => t.person === "Christine").length; return { eric, christine, diff: Math.abs(eric - christine) }; };
   const getNextPerson = (bucket) => { const c = getTurnCounts(bucket); if (c.eric === 0 && c.christine === 0) return null; if (c.eric === c.christine) return null; return c.eric > c.christine ? "Christine" : "Eric"; };
   const getHistory = (bucket) => turns.filter(t => t.bucket === bucket).slice(0, 5);
 
-  const urProgs = progs.filter(p => p.color === C.chase);
-  const mrProgs = progs.filter(p => p.color === C.amex);
+  const urProgs = progs.filter(p => p.id === "ur-e" || p.id === "ur-c");
+  const mrProgs = progs.filter(p => p.id === "mr");
   const urT = urProgs.reduce((s, p) => s + p.value, 0);
   const mrT = mrProgs.reduce((s, p) => s + p.value, 0);
   const urUpdated = urProgs.filter(p => p.updated).sort((a, b) => new Date(b.updated) - new Date(a.updated))[0]?.updated;
@@ -221,11 +228,13 @@ export default function App() {
       </div>
 
       {/* TABS */}
-      <div ref={tabRef} style={{ display: "flex", padding: "4px", borderRadius: 10, background: UI.bg2, position: "sticky", top: 8, zIndex: 10, marginBottom: 4, border: `1px solid ${UI.border}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", position: "relative" }}>
-        <div style={{ position: "absolute", top: 4, height: "calc(100% - 8px)", borderRadius: 7, background: UI.bg4, transition: "left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1)", ...pillStyle }} />
-        {tabs.map(t => (
-          <button key={t.id} data-tab={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: "8px 0", borderRadius: 7, fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: display, textAlign: "center", background: "transparent", color: tab === t.id ? UI.text : UI.text3, position: "relative", zIndex: 1, transition: "color 0.2s" }}>{t.l}</button>
-        ))}
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: UI.bg, paddingTop: 4, paddingBottom: 4 }}>
+        <div ref={tabRef} style={{ display: "flex", padding: "4px", borderRadius: 10, background: UI.bg2, border: `1px solid ${UI.border}`, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", position: "relative" }}>
+          <div style={{ position: "absolute", top: 4, height: "calc(100% - 8px)", borderRadius: 7, background: UI.bg4, transition: "left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1)", ...pillStyle }} />
+          {tabs.map(t => (
+            <button key={t.id} data-tab={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: "8px 0", borderRadius: 7, fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: display, textAlign: "center", background: "transparent", color: tab === t.id ? UI.text : UI.text3, position: "relative", zIndex: 1, transition: "color 0.2s" }}>{t.l}</button>
+          ))}
+        </div>
       </div>
 
       {/* SWIPE */}
