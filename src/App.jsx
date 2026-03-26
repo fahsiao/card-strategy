@@ -65,7 +65,7 @@ const AMEX_P = [
   { n: "Choice Privileges", u: "Budget. Rarely worth it.", r: "1:1 · ~0.6cpp" },
 ];
 const KEY_DATES = [
-  { d: "Apr 2026", w: "Open business card. Test Ink Biz Preferred.", c: C.teal },
+  { d: "Apr 2026", w: "Open business card. Popup-test Ink Biz Preferred first.", c: C.teal },
   { d: "Aug 1", w: "Marriott Bonvoy $95. Downgrade by Aug 30 if unused.", c: C.coral },
   { d: "~Sep", w: "AMEX Gold SUB deadline ($6K/6mo).", c: C.amex },
   { d: "Sep 2026", w: "CSR renews $795. Tally credits, decide.", c: C.chase },
