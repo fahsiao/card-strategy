@@ -125,6 +125,13 @@ export async function createTrip(name) {
   return data
 }
 
+export async function updateTrip(id, name) {
+  if (!supabase) return null
+  const { data, error } = await supabase.from('trips').update({ name }).eq('id', id).select().single()
+  if (error) { console.error('updateTrip error:', error); return null }
+  return data
+}
+
 export async function deleteTrip(id) {
   if (!supabase) return
   const { error } = await supabase.from('trips').delete().eq('id', id)

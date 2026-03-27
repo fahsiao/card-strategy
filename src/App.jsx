@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getBalances, upsertBalance, deleteBalance, subscribeBalances, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, subscribeTurns, getTrips, createTrip, deleteTrip as sbDeleteTrip, getTripMembers, addTripMember, removeTripMember, getExpenses, addExpense, updateExpense, deleteExpense, subscribeTrips, subscribeTripData } from "./supabase";
+import { getBalances, upsertBalance, deleteBalance, subscribeBalances, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, subscribeTurns, getTrips, createTrip, updateTrip, deleteTrip as sbDeleteTrip, getTripMembers, addTripMember, removeTripMember, getExpenses, addExpense, updateExpense, deleteExpense, subscribeTrips, subscribeTripData } from "./supabase";
 
 const C = { chase: "#6BAAED", amex: "#E4B94E", green: "#6DD4A0", red: "#E88080", purple: "#B699E8", teal: "#5CD4BE", coral: "#E89678" };
 const UI = { bg: "#0C0C0B", bg2: "#141413", bg3: "#1C1C1A", bg4: "#252523", border: "#2A2A27", borderLight: "#353532", text: "#F2F1EE", text2: "#B0AFA9", text3: "#706F6A" };
@@ -143,6 +143,7 @@ export default function App() {
   const [confirmDelTrip, setConfirmDelTrip] = useState(null);
   const [expandedExp, setExpandedExp] = useState(null);
   const [editingExp, setEditingExp] = useState(null);
+  const [editingTripName, setEditingTripName] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => { (async () => {
@@ -250,10 +251,53 @@ export default function App() {
     setNewMemberName(""); setNewMemberOpen(false);
   }, [newMemberName, activeTrip]);
 
-  const handleRemoveMember = useCallback(async (id) => {
+  const [confirmRemoveMember, setConfirmRemoveMember] = useState(null);
+
+  const memberHasExpenses = useCallback((name) => {
+    return tripExpenses.some(e => e.paid_by === name || (e.split_among || []).includes(name));
+  }, [tripExpenses]);
+
+  const handleRemoveMember = useCallback(async (id, name) => {
     if (!activeTrip) return;
+    if (memberHasExpenses(name)) { setConfirmRemoveMember({ id, name }); return; }
     await removeTripMember(activeTrip.id, id);
-  }, [activeTrip]);
+    setTripMembers(prev => prev.filter(m => m.id !== id));
+  }, [activeTrip, memberHasExpenses]);
+
+  const handleForceRemoveMember = useCallback(async (id, name) => {
+    if (!activeTrip) return;
+    // Remove person from all expense splits and reassign paid_by if needed
+    for (const e of tripExpenses) {
+      const split = e.split_among || [];
+      const inSplit = split.includes(name);
+      const isPayer = e.paid_by === name;
+      if (inSplit || isPayer) {
+        const newSplit = split.filter(n => n !== name);
+        const newPaidBy = isPayer ? (newSplit[0] || name) : e.paid_by;
+        if (newSplit.length > 0) {
+          await updateExpense(e.id, { name: e.name, amount: e.amount, paidBy: newPaidBy, splitAmong: newSplit, notes: e.notes });
+        } else {
+          await deleteExpense(e.id);
+        }
+      }
+    }
+    await removeTripMember(activeTrip.id, id);
+    setTripMembers(prev => prev.filter(m => m.id !== id));
+    setConfirmRemoveMember(null);
+    // Reload expenses since they changed
+    const updated = await getExpenses(activeTrip.id);
+    setTripExpenses(updated);
+  }, [activeTrip, tripExpenses]);
+
+  const handleUpdateTripName = useCallback(async () => {
+    if (!editingTripName?.trim() || !activeTrip) return;
+    const t = await updateTrip(activeTrip.id, editingTripName.trim());
+    if (t) {
+      setActiveTrip(t);
+      setTrips(prev => prev.map(trip => trip.id === t.id ? t : trip));
+    }
+    setEditingTripName(null);
+  }, [editingTripName, activeTrip]);
 
   const handleAddExpense = useCallback(async () => {
     if (!expForm.name.trim() || !expForm.amount || !expForm.paidBy || expForm.splitAmong.length === 0 || !activeTrip) return;
@@ -579,9 +623,19 @@ export default function App() {
               <>
                 {/* Back + header */}
                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
-                  <button onClick={() => { setActiveTrip(null); setExpFormOpen(false); setNewMemberOpen(false); }} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 8, padding: "6px 10px", color: UI.text2, cursor: "pointer", fontFamily: display, fontSize: 14 }}>←</button>
+                  <button onClick={() => { setActiveTrip(null); setExpFormOpen(false); setNewMemberOpen(false); setEditingTripName(null); }} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 8, padding: "6px 10px", color: UI.text2, cursor: "pointer", fontFamily: display, fontSize: 14 }}>←</button>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 18, fontWeight: 700 }}>{activeTrip.name}</div>
+                    {editingTripName !== null ? (
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <input type="text" value={editingTripName} onChange={ev => setEditingTripName(ev.target.value)} onKeyDown={ev => ev.key === "Enter" && handleUpdateTripName()} autoFocus style={{ background: UI.bg, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "5px 10px", color: UI.text, fontFamily: display, fontSize: 16, fontWeight: 700, outline: "none", flex: 1 }} />
+                        <button onClick={handleUpdateTripName} style={{ background: UI.bg3, border: `1px solid ${UI.border}`, borderRadius: 6, padding: "5px 10px", color: UI.text, fontSize: 11, fontFamily: display, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                        <button onClick={() => setEditingTripName(null)} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 6, padding: "5px 8px", color: UI.text3, fontSize: 11, fontFamily: display, cursor: "pointer" }}>×</button>
+                      </div>
+                    ) : (
+                      <div onClick={() => setEditingTripName(activeTrip.name)} style={{ cursor: "pointer" }}>
+                        <div style={{ fontSize: 18, fontWeight: 700 }}>{activeTrip.name}</div>
+                      </div>
+                    )}
                     <div style={{ fontSize: 11, color: UI.text3, marginTop: 1 }}>{tripMembers.length} people · {tripExpenses.length} expenses · <span style={{ fontFamily: mono, fontWeight: 500 }}>${totalExp.toFixed(2)}</span></div>
                   </div>
                 </div>
@@ -591,9 +645,9 @@ export default function App() {
                   <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: UI.text3, marginBottom: 8 }}>People</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {tripMembers.map(m => (
-                      <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, background: UI.bg3, border: `1px solid ${UI.border}`, borderRadius: 20, padding: "5px 10px 5px 12px", fontSize: 12, fontWeight: 500 }}>
+                      <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, background: UI.bg3, border: `1px solid ${confirmRemoveMember?.id === m.id ? C.red : UI.border}`, borderRadius: 20, padding: "5px 10px 5px 12px", fontSize: 12, fontWeight: 500 }}>
                         {m.name}
-                        <button onClick={() => handleRemoveMember(m.id)} style={{ background: "none", border: "none", color: UI.text3, cursor: "pointer", fontSize: 12, padding: "0 2px", fontFamily: display, lineHeight: 1 }}>×</button>
+                        <button onClick={() => handleRemoveMember(m.id, m.name)} style={{ background: "none", border: "none", color: UI.text3, cursor: "pointer", fontSize: 12, padding: "0 2px", fontFamily: display, lineHeight: 1 }}>×</button>
                       </div>
                     ))}
                     {newMemberOpen ? (
@@ -605,6 +659,15 @@ export default function App() {
                       <button onClick={() => setNewMemberOpen(true)} style={{ background: "none", border: `1px dashed ${UI.border}`, borderRadius: 20, padding: "5px 14px", color: UI.text3, cursor: "pointer", fontFamily: display, fontSize: 12, fontWeight: 500 }}>+</button>
                     )}
                   </div>
+                  {confirmRemoveMember && (
+                    <div style={{ marginTop: 8, background: `${C.coral}0C`, border: `1px solid ${C.coral}30`, borderRadius: 10, padding: "10px 14px" }}>
+                      <div style={{ fontSize: 12, color: C.coral, marginBottom: 8 }}><strong>{confirmRemoveMember.name}</strong> has expenses. Removing them will reassign their paid expenses and remove them from all splits.</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => handleForceRemoveMember(confirmRemoveMember.id, confirmRemoveMember.name)} style={{ background: C.coral, border: "none", borderRadius: 6, padding: "5px 14px", color: "#fff", fontSize: 11, fontWeight: 600, fontFamily: display, cursor: "pointer" }}>Remove anyway</button>
+                        <button onClick={() => setConfirmRemoveMember(null)} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 6, padding: "5px 12px", color: UI.text3, fontSize: 11, fontFamily: display, cursor: "pointer" }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Settlement */}
