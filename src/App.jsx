@@ -228,41 +228,36 @@ export default function App() {
   const handleCreateTrip = useCallback(async () => {
     if (!newTripName.trim()) return;
     const t = await createTrip(newTripName.trim());
-    if (t) { setTrips(prev => [t, ...prev]); setActiveTrip(t); }
+    if (t) setActiveTrip(t);
     setNewTripName(""); setNewTripOpen(false);
   }, [newTripName]);
 
   const handleDeleteTrip = useCallback(async (id) => {
     await sbDeleteTrip(id);
-    setTrips(prev => prev.filter(t => t.id !== id));
     if (activeTrip?.id === id) setActiveTrip(null);
     setConfirmDelTrip(null);
   }, [activeTrip]);
 
   const handleAddMember = useCallback(async () => {
     if (!newMemberName.trim() || !activeTrip) return;
-    const m = await addTripMember(activeTrip.id, newMemberName.trim());
-    if (m) setTripMembers(prev => [...prev, m]);
+    await addTripMember(activeTrip.id, newMemberName.trim());
     setNewMemberName(""); setNewMemberOpen(false);
   }, [newMemberName, activeTrip]);
 
   const handleRemoveMember = useCallback(async (id) => {
     if (!activeTrip) return;
     await removeTripMember(activeTrip.id, id);
-    setTripMembers(prev => prev.filter(m => m.id !== id));
   }, [activeTrip]);
 
   const handleAddExpense = useCallback(async () => {
     if (!expForm.name.trim() || !expForm.amount || !expForm.paidBy || expForm.splitAmong.length === 0 || !activeTrip) return;
-    const e = await addExpense({ tripId: activeTrip.id, name: expForm.name.trim(), amount: parseFloat(expForm.amount), paidBy: expForm.paidBy, splitAmong: expForm.splitAmong, notes: expForm.notes });
-    if (e) setTripExpenses(prev => [e, ...prev]);
+    await addExpense({ tripId: activeTrip.id, name: expForm.name.trim(), amount: parseFloat(expForm.amount), paidBy: expForm.paidBy, splitAmong: expForm.splitAmong, notes: expForm.notes });
     setExpForm({ name: "", amount: "", paidBy: "", splitAmong: tripMembers.map(m => m.name), notes: "" });
     setExpFormOpen(false);
   }, [expForm, activeTrip, tripMembers]);
 
   const handleDeleteExpense = useCallback(async (id) => {
     await deleteExpense(id);
-    setTripExpenses(prev => prev.filter(e => e.id !== id));
   }, []);
 
   const calcSettlement = (members, expenses) => {
