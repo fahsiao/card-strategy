@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getBalances, upsertBalance, deleteBalance, subscribeBalances, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, subscribeTurns } from "./supabase";
+import { getBalances, upsertBalance, deleteBalance, subscribeBalances, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, subscribeTurns, getTrips, createTrip, deleteTrip as sbDeleteTrip, getTripMembers, addTripMember, removeTripMember, getExpenses, addExpense, deleteExpense, subscribeTrips, subscribeTripData } from "./supabase";
 
 const C = { chase: "#6BAAED", amex: "#E4B94E", green: "#6DD4A0", red: "#E88080", purple: "#B699E8", teal: "#5CD4BE", coral: "#E89678" };
 const UI = { bg: "#0C0C0B", bg2: "#141413", bg3: "#1C1C1A", bg4: "#252523", border: "#2A2A27", borderLight: "#353532", text: "#F2F1EE", text2: "#B0AFA9", text3: "#706F6A" };
@@ -127,11 +127,24 @@ export default function App() {
   const skipRef = useRef(false);
   const tabRef = useRef(null);
   const [pillStyle, setPillStyle] = useState({});
+  // Split tab state
+  const [trips, setTrips] = useState([]);
+  const [activeTrip, setActiveTrip] = useState(null);
+  const [tripMembers, setTripMembers] = useState([]);
+  const [tripExpenses, setTripExpenses] = useState([]);
+  const [newTripName, setNewTripName] = useState("");
+  const [newTripOpen, setNewTripOpen] = useState(false);
+  const [newMemberName, setNewMemberName] = useState("");
+  const [newMemberOpen, setNewMemberOpen] = useState(false);
+  const [expForm, setExpForm] = useState({ name: "", amount: "", paidBy: "", splitAmong: [], notes: "" });
+  const [expFormOpen, setExpFormOpen] = useState(false);
+  const [confirmDelTrip, setConfirmDelTrip] = useState(null);
 
   useEffect(() => { (async () => {
-    const [balData, turnsData] = await Promise.all([getBalances(), getTurns()]);
+    const [balData, turnsData, tripsData] = await Promise.all([getBalances(), getTurns(), getTrips()]);
     if (balData && balData.length > 0) { setProgs(sortProgs(balData.map(fromDB))); setSynced(true); }
     if (turnsData) setTurns(turnsData);
+    if (tripsData) setTrips(tripsData);
     setLoaded(true);
   })(); }, []);
 
@@ -183,6 +196,107 @@ export default function App() {
   const getNextPerson = (bucket) => { const c = getTurnCounts(bucket); if (c.eric === 0 && c.christine === 0) return null; if (c.eric === c.christine) return null; return c.eric > c.christine ? "Christine" : "Eric"; };
   const getHistory = (bucket) => turns.filter(t => t.bucket === bucket).slice(0, 5);
 
+  // Split tab: subscribe to trips list
+  useEffect(() => {
+    const unsub = subscribeTrips((payload) => {
+      if (payload.eventType === "INSERT") setTrips(prev => [payload.new, ...prev]);
+      if (payload.eventType === "DELETE") setTrips(prev => prev.filter(t => t.id !== payload.old.id));
+    });
+    return unsub;
+  }, []);
+
+  // Split tab: load + subscribe to active trip data
+  useEffect(() => {
+    if (!activeTrip) { setTripMembers([]); setTripExpenses([]); return; }
+    (async () => {
+      const [m, e] = await Promise.all([getTripMembers(activeTrip.id), getExpenses(activeTrip.id)]);
+      setTripMembers(m); setTripExpenses(e);
+    })();
+    const unsub = subscribeTripData(activeTrip.id,
+      (p) => {
+        if (p.eventType === "INSERT") setTripMembers(prev => [...prev, p.new]);
+        if (p.eventType === "DELETE") setTripMembers(prev => prev.filter(m => m.id !== p.old.id));
+      },
+      (p) => {
+        if (p.eventType === "INSERT") setTripExpenses(prev => [p.new, ...prev]);
+        if (p.eventType === "DELETE") setTripExpenses(prev => prev.filter(e => e.id !== p.old.id));
+      }
+    );
+    return unsub;
+  }, [activeTrip]);
+
+  const handleCreateTrip = useCallback(async () => {
+    if (!newTripName.trim()) return;
+    const t = await createTrip(newTripName.trim());
+    if (t) { setTrips(prev => [t, ...prev]); setActiveTrip(t); }
+    setNewTripName(""); setNewTripOpen(false);
+  }, [newTripName]);
+
+  const handleDeleteTrip = useCallback(async (id) => {
+    await sbDeleteTrip(id);
+    setTrips(prev => prev.filter(t => t.id !== id));
+    if (activeTrip?.id === id) setActiveTrip(null);
+    setConfirmDelTrip(null);
+  }, [activeTrip]);
+
+  const handleAddMember = useCallback(async () => {
+    if (!newMemberName.trim() || !activeTrip) return;
+    const m = await addTripMember(activeTrip.id, newMemberName.trim());
+    if (m) setTripMembers(prev => [...prev, m]);
+    setNewMemberName(""); setNewMemberOpen(false);
+  }, [newMemberName, activeTrip]);
+
+  const handleRemoveMember = useCallback(async (id) => {
+    if (!activeTrip) return;
+    await removeTripMember(activeTrip.id, id);
+    setTripMembers(prev => prev.filter(m => m.id !== id));
+  }, [activeTrip]);
+
+  const handleAddExpense = useCallback(async () => {
+    if (!expForm.name.trim() || !expForm.amount || !expForm.paidBy || expForm.splitAmong.length === 0 || !activeTrip) return;
+    const e = await addExpense({ tripId: activeTrip.id, name: expForm.name.trim(), amount: parseFloat(expForm.amount), paidBy: expForm.paidBy, splitAmong: expForm.splitAmong, notes: expForm.notes });
+    if (e) setTripExpenses(prev => [e, ...prev]);
+    setExpForm({ name: "", amount: "", paidBy: "", splitAmong: tripMembers.map(m => m.name), notes: "" });
+    setExpFormOpen(false);
+  }, [expForm, activeTrip, tripMembers]);
+
+  const handleDeleteExpense = useCallback(async (id) => {
+    await deleteExpense(id);
+    setTripExpenses(prev => prev.filter(e => e.id !== id));
+  }, []);
+
+  const calcSettlement = (members, expenses) => {
+    const nets = {};
+    members.forEach(m => { nets[m.name] = 0; });
+    expenses.forEach(e => {
+      const amt = parseFloat(e.amount) || 0;
+      const split = e.split_among || [];
+      if (split.length === 0) return;
+      const share = amt / split.length;
+      if (nets[e.paid_by] !== undefined) nets[e.paid_by] += amt;
+      split.forEach(name => { if (nets[name] !== undefined) nets[name] -= share; });
+    });
+    // Simplify debts
+    const debtors = []; const creditors = [];
+    Object.entries(nets).forEach(([name, net]) => {
+      if (net < -0.005) debtors.push({ name, amount: -net });
+      else if (net > 0.005) creditors.push({ name, amount: net });
+    });
+    debtors.sort((a, b) => b.amount - a.amount);
+    creditors.sort((a, b) => b.amount - a.amount);
+    const txns = [];
+    let di = 0, ci = 0;
+    while (di < debtors.length && ci < creditors.length) {
+      const settle = Math.min(debtors[di].amount, creditors[ci].amount);
+      if (settle > 0.005) txns.push({ from: debtors[di].name, to: creditors[ci].name, amount: settle });
+      debtors[di].amount -= settle;
+      creditors[ci].amount -= settle;
+      if (debtors[di].amount < 0.01) di++;
+      if (creditors[ci].amount < 0.01) ci++;
+    }
+    return { nets, txns };
+  };
+
   const urProgs = progs.filter(p => p.id === "ur-e" || p.id === "ur-c");
   const mrProgs = progs.filter(p => p.id === "mr");
   const urT = urProgs.reduce((s, p) => s + p.value, 0);
@@ -190,7 +304,7 @@ export default function App() {
   const urUpdated = urProgs.filter(p => p.updated).sort((a, b) => new Date(b.updated) - new Date(a.updated))[0]?.updated;
   const mrUpdated = mrProgs.filter(p => p.updated).sort((a, b) => new Date(b.updated) - new Date(a.updated))[0]?.updated;
   const totalFee = [...CARDS_ERIC, ...CARDS_CHRISTINE].reduce((s, c) => s + c.fee, 0);
-  const tabs = [{ id: "swipe", l: "Swipe" }, { id: "turns", l: "Turns" }, { id: "trip", l: "Trips" }, { id: "balances", l: "Points" }, { id: "cards", l: "Cards" }];
+  const tabs = [{ id: "swipe", l: "Swipe" }, { id: "turns", l: "Turns" }, { id: "trip", l: "Trips" }, { id: "split", l: "Split" }, { id: "balances", l: "Points" }, { id: "cards", l: "Cards" }];
 
   if (!loaded) return <div style={{ fontFamily: display, background: UI.bg, color: UI.text3, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ fontSize: 13, opacity: 0.5 }}>Loading...</div></div>;
 
@@ -398,6 +512,198 @@ export default function App() {
               <Note><strong style={{ color: UI.text }}>Never transfer speculatively.</strong> Confirm availability. One-way, irreversible.</Note>
             </div>
           )}
+        </div>
+      )}
+
+      {/* SPLIT */}
+      {tab === "split" && (
+        <div className="tab-content" style={{ paddingTop: 18 }}>
+          {!activeTrip ? (
+            <>
+              {trips.length === 0 && !newTripOpen && (
+                <div style={{ textAlign: "center", padding: "40px 20px" }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>Split expenses</div>
+                  <div style={{ fontSize: 13, color: UI.text2, lineHeight: 1.6, maxWidth: 280, margin: "0 auto" }}>Create a trip to start tracking group expenses and settling up.</div>
+                </div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {trips.map(t => {
+                  const isConfirming = confirmDelTrip === t.id;
+                  return (
+                    <div key={t.id} onClick={() => !isConfirming && setActiveTrip(t)} style={{ background: `linear-gradient(160deg, ${UI.bg2}, ${UI.bg3})`, border: `1px solid ${UI.border}`, borderRadius: 12, padding: "16px 18px", cursor: "pointer", transition: "border-color .2s" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ fontSize: 15, fontWeight: 600 }}>{t.name}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 10, color: UI.text3, fontFamily: mono }}>{new Date(t.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                          <button onClick={(e) => { e.stopPropagation(); setConfirmDelTrip(isConfirming ? null : t.id); }} style={{ background: "none", border: "none", color: isConfirming ? C.red : UI.text3, cursor: "pointer", fontSize: 14, padding: "0 4px", fontFamily: display }}>×</button>
+                        </div>
+                      </div>
+                      {isConfirming && (
+                        <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", background: `${C.red}0C`, border: `1px solid ${C.red}30`, borderRadius: 8, padding: "8px 12px" }} onClick={e => e.stopPropagation()}>
+                          <span style={{ fontSize: 12, color: C.red }}>Delete this trip?</span>
+                          <div style={{ display: "flex", gap: 4 }}>
+                            <button onClick={() => handleDeleteTrip(t.id)} style={{ background: C.red, border: "none", borderRadius: 6, padding: "4px 12px", color: "#fff", fontSize: 11, fontWeight: 600, fontFamily: display, cursor: "pointer" }}>Delete</button>
+                            <button onClick={() => setConfirmDelTrip(null)} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 6, padding: "4px 10px", color: UI.text3, fontSize: 11, fontFamily: display, cursor: "pointer" }}>Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {newTripOpen ? (
+                <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
+                  <input type="text" value={newTripName} onChange={e => setNewTripName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleCreateTrip()} placeholder="e.g. Japan 2026, Weekend trip" autoFocus style={{ flex: 1, background: UI.bg, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "9px 14px", color: UI.text, fontFamily: display, fontSize: 16, outline: "none", transition: "border-color .2s" }} />
+                  <button onClick={handleCreateTrip} style={{ background: UI.bg3, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "9px 16px", color: UI.text, cursor: "pointer", fontFamily: display, fontSize: 13, fontWeight: 600 }}>Create</button>
+                  <button onClick={() => { setNewTripOpen(false); setNewTripName(""); }} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 8, padding: "9px 12px", color: UI.text3, cursor: "pointer", fontFamily: display, fontSize: 12 }}>Cancel</button>
+                </div>
+              ) : (
+                <button onClick={() => setNewTripOpen(true)} style={{ width: "100%", background: "none", border: `1px dashed ${UI.border}`, borderRadius: 8, padding: 10, color: UI.text3, cursor: "pointer", fontFamily: display, fontSize: 12, marginTop: 8, fontWeight: 500, transition: "all .15s" }}>+ New trip</button>
+              )}
+            </>
+          ) : (() => {
+            const { nets, txns } = calcSettlement(tripMembers, tripExpenses);
+            const totalExp = tripExpenses.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+            return (
+              <>
+                {/* Back + header */}
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+                  <button onClick={() => { setActiveTrip(null); setExpFormOpen(false); setNewMemberOpen(false); }} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 8, padding: "6px 10px", color: UI.text2, cursor: "pointer", fontFamily: display, fontSize: 14 }}>←</button>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>{activeTrip.name}</div>
+                    <div style={{ fontSize: 11, color: UI.text3, marginTop: 1 }}>{tripMembers.length} people · {tripExpenses.length} expenses · <span style={{ fontFamily: mono, fontWeight: 500 }}>${totalExp.toFixed(2)}</span></div>
+                  </div>
+                </div>
+
+                {/* People */}
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: UI.text3, marginBottom: 8 }}>People</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {tripMembers.map(m => (
+                      <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, background: UI.bg3, border: `1px solid ${UI.border}`, borderRadius: 20, padding: "5px 10px 5px 12px", fontSize: 12, fontWeight: 500 }}>
+                        {m.name}
+                        <button onClick={() => handleRemoveMember(m.id)} style={{ background: "none", border: "none", color: UI.text3, cursor: "pointer", fontSize: 12, padding: "0 2px", fontFamily: display, lineHeight: 1 }}>×</button>
+                      </div>
+                    ))}
+                    {newMemberOpen ? (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <input type="text" value={newMemberName} onChange={e => setNewMemberName(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddMember()} placeholder="Name" autoFocus style={{ background: UI.bg, border: `1px solid ${UI.border}`, borderRadius: 20, padding: "5px 12px", color: UI.text, fontFamily: display, fontSize: 12, outline: "none", width: 100 }} />
+                        <button onClick={handleAddMember} style={{ background: UI.bg3, border: `1px solid ${UI.border}`, borderRadius: 20, padding: "5px 12px", color: UI.text, cursor: "pointer", fontFamily: display, fontSize: 11, fontWeight: 600 }}>Add</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setNewMemberOpen(true)} style={{ background: "none", border: `1px dashed ${UI.border}`, borderRadius: 20, padding: "5px 14px", color: UI.text3, cursor: "pointer", fontFamily: display, fontSize: 12, fontWeight: 500 }}>+</button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Settlement */}
+                {tripExpenses.length > 0 && (
+                  <div style={{ marginBottom: 18 }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: UI.text3, marginBottom: 8 }}>Settlement</div>
+                    {txns.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {txns.map((tx, i) => (
+                          <div key={i} style={{ background: `linear-gradient(135deg, ${UI.bg2}, ${UI.bg3})`, border: `1px solid ${UI.border}`, borderRadius: 10, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div style={{ fontSize: 13 }}>
+                              <span style={{ fontWeight: 600, color: C.coral }}>{tx.from}</span>
+                              <span style={{ color: UI.text3, margin: "0 8px" }}>→</span>
+                              <span style={{ fontWeight: 600, color: C.green }}>{tx.to}</span>
+                            </div>
+                            <div style={{ fontFamily: mono, fontSize: 15, fontWeight: 600, color: UI.text }}>${tx.amount.toFixed(2)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ background: `${C.green}0A`, border: `1px solid ${C.green}30`, borderRadius: 10, padding: "12px 16px", textAlign: "center", fontSize: 13, color: C.green, fontWeight: 500 }}>All settled up</div>
+                    )}
+                    {/* Per-person breakdown */}
+                    <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(tripMembers.length, 3)}, 1fr)`, gap: 6, marginTop: 8 }}>
+                      {tripMembers.map(m => {
+                        const net = nets[m.name] || 0;
+                        const color = net > 0.005 ? C.green : net < -0.005 ? C.coral : UI.text3;
+                        return (
+                          <div key={m.id} style={{ background: UI.bg2, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "8px 10px", textAlign: "center" }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: UI.text2, marginBottom: 2 }}>{m.name}</div>
+                            <div style={{ fontFamily: mono, fontSize: 13, fontWeight: 600, color }}>{net > 0.005 ? "+" : ""}{net.toFixed(2)}</div>
+                            <div style={{ fontSize: 9, color: UI.text3, marginTop: 1 }}>{net > 0.005 ? "gets back" : net < -0.005 ? "owes" : "even"}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Add Expense */}
+                {tripMembers.length >= 2 && (
+                  expFormOpen ? (
+                    <div style={{ background: `linear-gradient(160deg, ${UI.bg2}, ${UI.bg3})`, border: `1px solid ${UI.border}`, borderRadius: 12, padding: 16, marginBottom: 18 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: UI.text3, marginBottom: 10 }}>Add expense</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <input type="text" value={expForm.name} onChange={e => setExpForm(p => ({ ...p, name: e.target.value }))} placeholder="What was it?" style={{ background: UI.bg, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "9px 14px", color: UI.text, fontFamily: display, fontSize: 14, outline: "none" }} />
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <div style={{ position: "relative", flex: 1 }}>
+                            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: UI.text3, fontFamily: mono, fontSize: 14 }}>$</span>
+                            <input type="number" inputMode="decimal" value={expForm.amount} onChange={e => setExpForm(p => ({ ...p, amount: e.target.value }))} placeholder="0.00" style={{ width: "100%", background: UI.bg, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "9px 14px 9px 26px", color: UI.text, fontFamily: mono, fontSize: 16, fontWeight: 600, outline: "none", boxSizing: "border-box" }} />
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: UI.text3, marginBottom: 4, fontWeight: 500 }}>Paid by</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                            {tripMembers.map(m => (
+                              <button key={m.id} onClick={() => setExpForm(p => ({ ...p, paidBy: m.name }))} style={{ background: expForm.paidBy === m.name ? `${C.chase}20` : UI.bg, border: `1px solid ${expForm.paidBy === m.name ? C.chase : UI.border}`, borderRadius: 20, padding: "5px 12px", color: expForm.paidBy === m.name ? C.chase : UI.text2, cursor: "pointer", fontFamily: display, fontSize: 12, fontWeight: expForm.paidBy === m.name ? 600 : 400, transition: "all .15s" }}>{m.name}</button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: UI.text3, marginBottom: 4, fontWeight: 500 }}>Split among</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                            {tripMembers.map(m => {
+                              const on = expForm.splitAmong.includes(m.name);
+                              return (
+                                <button key={m.id} onClick={() => setExpForm(p => ({ ...p, splitAmong: on ? p.splitAmong.filter(n => n !== m.name) : [...p.splitAmong, m.name] }))} style={{ background: on ? `${C.green}20` : UI.bg, border: `1px solid ${on ? C.green : UI.border}`, borderRadius: 20, padding: "5px 12px", color: on ? C.green : UI.text2, cursor: "pointer", fontFamily: display, fontSize: 12, fontWeight: on ? 600 : 400, transition: "all .15s" }}>{m.name}</button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <input type="text" value={expForm.notes} onChange={e => setExpForm(p => ({ ...p, notes: e.target.value }))} placeholder="Notes (optional)" style={{ background: UI.bg, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "7px 14px", color: UI.text2, fontFamily: display, fontSize: 12, outline: "none" }} />
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={handleAddExpense} disabled={!expForm.name || !expForm.amount || !expForm.paidBy || expForm.splitAmong.length === 0} style={{ flex: 1, background: expForm.name && expForm.amount && expForm.paidBy && expForm.splitAmong.length > 0 ? C.chase : UI.bg3, border: "none", borderRadius: 8, padding: "10px 16px", color: expForm.name && expForm.amount && expForm.paidBy && expForm.splitAmong.length > 0 ? "#fff" : UI.text3, cursor: "pointer", fontFamily: display, fontSize: 13, fontWeight: 600, transition: "all .15s" }}>Add expense</button>
+                          <button onClick={() => setExpFormOpen(false)} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 8, padding: "10px 14px", color: UI.text3, cursor: "pointer", fontFamily: display, fontSize: 12 }}>Cancel</button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={() => { setExpForm({ name: "", amount: "", paidBy: "", splitAmong: tripMembers.map(m => m.name), notes: "" }); setExpFormOpen(true); }} style={{ width: "100%", background: `linear-gradient(160deg, ${C.chase}18, ${C.chase}08)`, border: `1px solid ${C.chase}30`, borderRadius: 10, padding: "12px 16px", color: C.chase, cursor: "pointer", fontFamily: display, fontSize: 13, fontWeight: 600, marginBottom: 18, transition: "all .15s" }}>+ Add expense</button>
+                  )
+                )}
+                {tripMembers.length < 2 && tripMembers.length > 0 && (
+                  <div style={{ background: `${C.amex}0A`, border: `1px solid ${C.amex}30`, borderRadius: 10, padding: "12px 16px", marginBottom: 18, fontSize: 12, color: C.amex, textAlign: "center" }}>Add at least 2 people to start adding expenses</div>
+                )}
+
+                {/* Expenses list */}
+                {tripExpenses.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: UI.text3, marginBottom: 8 }}>Expenses</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      {tripExpenses.map((e, i) => (
+                        <div key={e.id} style={{ display: "flex", alignItems: "center", padding: "10px 12px", borderRadius: 8, background: i % 2 === 0 ? "transparent" : UI.bg2, gap: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</div>
+                            <div style={{ fontSize: 10, color: UI.text3, marginTop: 2 }}>
+                              <span style={{ fontWeight: 500, color: UI.text2 }}>{e.paid_by}</span> paid · split {(e.split_among || []).length}
+                              {e.notes && <span> · {e.notes}</span>}
+                            </div>
+                          </div>
+                          <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap" }}>${parseFloat(e.amount).toFixed(2)}</div>
+                          <button onClick={() => handleDeleteExpense(e.id)} style={{ background: "none", border: "none", color: UI.text3, cursor: "pointer", fontSize: 14, padding: "0 2px", fontFamily: display }}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
 

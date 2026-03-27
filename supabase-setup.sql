@@ -61,3 +61,52 @@ insert into public.balances (id, label, value, color, is_system) values
   ('ur-c', 'Chase UR (Christine CSP + Freedom)', 0, '#5B9BD5', true),
   ('mr', 'AMEX MR (Gold)', 0, '#D4A840', true)
 on conflict (id) do nothing;
+
+-- ── EXPENSE SPLITTING ──────────────────────────────────
+
+-- 8. Trips table
+create table if not exists public.trips (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  created_at timestamptz default now()
+);
+
+alter table public.trips enable row level security;
+create policy "Allow all reads on trips" on public.trips for select using (true);
+create policy "Allow all inserts on trips" on public.trips for insert with check (true);
+create policy "Allow all updates on trips" on public.trips for update using (true);
+create policy "Allow all deletes on trips" on public.trips for delete using (true);
+alter publication supabase_realtime add table public.trips;
+
+-- 9. Trip members table
+create table if not exists public.trip_members (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid not null references public.trips(id) on delete cascade,
+  name text not null,
+  created_at timestamptz default now()
+);
+
+alter table public.trip_members enable row level security;
+create policy "Allow all reads on trip_members" on public.trip_members for select using (true);
+create policy "Allow all inserts on trip_members" on public.trip_members for insert with check (true);
+create policy "Allow all deletes on trip_members" on public.trip_members for delete using (true);
+alter publication supabase_realtime add table public.trip_members;
+
+-- 10. Expenses table
+create table if not exists public.expenses (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid not null references public.trips(id) on delete cascade,
+  name text not null,
+  amount numeric not null,
+  paid_by text not null,
+  split_among jsonb not null default '[]',
+  notes text,
+  created_at timestamptz default now()
+);
+
+alter table public.expenses enable row level security;
+create policy "Allow all reads on expenses" on public.expenses for select using (true);
+create policy "Allow all inserts on expenses" on public.expenses for insert with check (true);
+create policy "Allow all updates on expenses" on public.expenses for update using (true);
+create policy "Allow all deletes on expenses" on public.expenses for delete using (true);
+alter publication supabase_realtime add table public.expenses;
