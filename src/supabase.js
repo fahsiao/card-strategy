@@ -165,6 +165,13 @@ export async function addExpense({ tripId, name, amount, paidBy, splitAmong, not
   return data
 }
 
+export async function updateExpense(id, { name, amount, paidBy, splitAmong, notes }) {
+  if (!supabase) return null
+  const { data, error } = await supabase.from('expenses').update({ name, amount, paid_by: paidBy, split_among: splitAmong, notes: notes || null }).eq('id', id).select().single()
+  if (error) { console.error('updateExpense error:', error); return null }
+  return data
+}
+
 export async function deleteExpense(id) {
   if (!supabase) return
   const { error } = await supabase.from('expenses').delete().eq('id', id)

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getBalances, upsertBalance, deleteBalance, subscribeBalances, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, subscribeTurns, getTrips, createTrip, deleteTrip as sbDeleteTrip, getTripMembers, addTripMember, removeTripMember, getExpenses, addExpense, deleteExpense, subscribeTrips, subscribeTripData } from "./supabase";
+import { getBalances, upsertBalance, deleteBalance, subscribeBalances, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, subscribeTurns, getTrips, createTrip, deleteTrip as sbDeleteTrip, getTripMembers, addTripMember, removeTripMember, getExpenses, addExpense, updateExpense, deleteExpense, subscribeTrips, subscribeTripData } from "./supabase";
 
 const C = { chase: "#6BAAED", amex: "#E4B94E", green: "#6DD4A0", red: "#E88080", purple: "#B699E8", teal: "#5CD4BE", coral: "#E89678" };
 const UI = { bg: "#0C0C0B", bg2: "#141413", bg3: "#1C1C1A", bg4: "#252523", border: "#2A2A27", borderLight: "#353532", text: "#F2F1EE", text2: "#B0AFA9", text3: "#706F6A" };
@@ -142,6 +142,7 @@ export default function App() {
   const [expFormOpen, setExpFormOpen] = useState(false);
   const [confirmDelTrip, setConfirmDelTrip] = useState(null);
   const [expandedExp, setExpandedExp] = useState(null);
+  const [editingExp, setEditingExp] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => { (async () => {
@@ -223,6 +224,7 @@ export default function App() {
       },
       (p) => {
         if (p.eventType === "INSERT") setTripExpenses(prev => [p.new, ...prev]);
+        if (p.eventType === "UPDATE") setTripExpenses(prev => prev.map(e => e.id === p.new.id ? p.new : e));
         if (p.eventType === "DELETE") setTripExpenses(prev => prev.filter(e => e.id !== p.old.id));
       }
     );
@@ -262,7 +264,16 @@ export default function App() {
 
   const handleDeleteExpense = useCallback(async (id) => {
     await deleteExpense(id);
-  }, []);
+    if (expandedExp === id) setExpandedExp(null);
+    if (editingExp?.id === id) setEditingExp(null);
+  }, [expandedExp, editingExp]);
+
+  const handleEditExpense = useCallback(async () => {
+    if (!editingExp || !editingExp.name.trim() || !editingExp.amount || !editingExp.paidBy || editingExp.splitAmong.length === 0) return;
+    await updateExpense(editingExp.id, { name: editingExp.name.trim(), amount: parseFloat(editingExp.amount), paidBy: editingExp.paidBy, splitAmong: editingExp.splitAmong, notes: editingExp.notes });
+    setEditingExp(null);
+    setExpandedExp(null);
+  }, [editingExp]);
 
   const calcSettlement = (members, expenses) => {
     const nets = {};
@@ -705,10 +716,11 @@ export default function App() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                       {tripExpenses.map((e, i) => {
                         const isOpen = expandedExp === e.id;
+                        const isEditing = editingExp?.id === e.id;
                         const split = e.split_among || [];
                         const perPerson = split.length > 0 ? parseFloat(e.amount) / split.length : 0;
                         return (
-                          <div key={e.id} onClick={() => setExpandedExp(isOpen ? null : e.id)} style={{ padding: "10px 12px", borderRadius: 8, background: i % 2 === 0 ? "transparent" : UI.bg2, cursor: "pointer", transition: "all .15s" }}>
+                          <div key={e.id} onClick={() => { if (!isEditing) { setExpandedExp(isOpen ? null : e.id); setEditingExp(null); } }} style={{ padding: "10px 12px", borderRadius: 8, background: isOpen ? UI.bg2 : i % 2 === 0 ? "transparent" : UI.bg2, cursor: "pointer", transition: "all .15s" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</div>
@@ -718,7 +730,7 @@ export default function App() {
                               </div>
                               <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap" }}>${parseFloat(e.amount).toFixed(2)}</div>
                             </div>
-                            {isOpen && (
+                            {isOpen && !isEditing && (
                               <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${UI.border}` }}>
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: e.notes ? 8 : 6 }}>
                                   {split.map(name => (
@@ -726,7 +738,45 @@ export default function App() {
                                   ))}
                                 </div>
                                 {e.notes && <div style={{ fontSize: 11, color: UI.text3, marginBottom: 6 }}>{e.notes}</div>}
-                                <button onClick={(ev) => { ev.stopPropagation(); handleDeleteExpense(e.id); }} style={{ background: `${C.red}10`, border: `1px solid ${C.red}30`, borderRadius: 6, padding: "4px 12px", color: C.red, fontSize: 10, fontFamily: display, fontWeight: 500, cursor: "pointer" }}>Delete</button>
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  <button onClick={(ev) => { ev.stopPropagation(); setEditingExp({ id: e.id, name: e.name, amount: String(e.amount), paidBy: e.paid_by, splitAmong: [...split], notes: e.notes || "" }); }} style={{ background: `${C.chase}10`, border: `1px solid ${C.chase}30`, borderRadius: 6, padding: "4px 12px", color: C.chase, fontSize: 10, fontFamily: display, fontWeight: 500, cursor: "pointer" }}>Edit</button>
+                                  <button onClick={(ev) => { ev.stopPropagation(); handleDeleteExpense(e.id); }} style={{ background: `${C.red}10`, border: `1px solid ${C.red}30`, borderRadius: 6, padding: "4px 12px", color: C.red, fontSize: 10, fontFamily: display, fontWeight: 500, cursor: "pointer" }}>Delete</button>
+                                </div>
+                              </div>
+                            )}
+                            {isEditing && (
+                              <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${UI.border}` }} onClick={ev => ev.stopPropagation()}>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                  <input type="text" value={editingExp.name} onChange={ev => setEditingExp(p => ({ ...p, name: ev.target.value }))} style={{ background: UI.bg, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "7px 12px", color: UI.text, fontFamily: display, fontSize: 13, outline: "none" }} />
+                                  <div style={{ position: "relative" }}>
+                                    <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: UI.text3, fontFamily: mono, fontSize: 13 }}>$</span>
+                                    <input type="number" inputMode="decimal" value={editingExp.amount} onChange={ev => setEditingExp(p => ({ ...p, amount: ev.target.value }))} style={{ width: "100%", background: UI.bg, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "7px 12px 7px 24px", color: UI.text, fontFamily: mono, fontSize: 14, fontWeight: 600, outline: "none", boxSizing: "border-box" }} />
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 10, color: UI.text3, marginBottom: 4, fontWeight: 500 }}>Paid by</div>
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                      {tripMembers.map(m => (
+                                        <button key={m.id} onClick={() => setEditingExp(p => ({ ...p, paidBy: m.name }))} style={{ background: editingExp.paidBy === m.name ? `${C.chase}20` : UI.bg, border: `1px solid ${editingExp.paidBy === m.name ? C.chase : UI.border}`, borderRadius: 20, padding: "4px 10px", color: editingExp.paidBy === m.name ? C.chase : UI.text2, cursor: "pointer", fontFamily: display, fontSize: 11, fontWeight: editingExp.paidBy === m.name ? 600 : 400, transition: "all .15s" }}>{m.name}</button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 10, color: UI.text3, marginBottom: 4, fontWeight: 500 }}>Split among</div>
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                      {tripMembers.map(m => {
+                                        const on = editingExp.splitAmong.includes(m.name);
+                                        return (
+                                          <button key={m.id} onClick={() => setEditingExp(p => ({ ...p, splitAmong: on ? p.splitAmong.filter(n => n !== m.name) : [...p.splitAmong, m.name] }))} style={{ background: on ? `${C.green}20` : UI.bg, border: `1px solid ${on ? C.green : UI.border}`, borderRadius: 20, padding: "4px 10px", color: on ? C.green : UI.text2, cursor: "pointer", fontFamily: display, fontSize: 11, fontWeight: on ? 600 : 400, transition: "all .15s" }}>{m.name}</button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                  <input type="text" value={editingExp.notes} onChange={ev => setEditingExp(p => ({ ...p, notes: ev.target.value }))} placeholder="Notes (optional)" style={{ background: UI.bg, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "6px 12px", color: UI.text2, fontFamily: display, fontSize: 11, outline: "none" }} />
+                                  <div style={{ display: "flex", gap: 6 }}>
+                                    <button onClick={handleEditExpense} style={{ flex: 1, background: C.chase, border: "none", borderRadius: 6, padding: "8px 14px", color: "#fff", fontSize: 12, fontFamily: display, fontWeight: 600, cursor: "pointer" }}>Save</button>
+                                    <button onClick={() => setEditingExp(null)} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 6, padding: "8px 12px", color: UI.text3, fontSize: 11, fontFamily: display, cursor: "pointer" }}>Cancel</button>
+                                  </div>
+                                </div>
                               </div>
                             )}
                           </div>
