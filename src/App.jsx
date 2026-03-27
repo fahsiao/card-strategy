@@ -205,7 +205,7 @@ export default function App() {
   // Split tab: subscribe to trips list
   useEffect(() => {
     const unsub = subscribeTrips((payload) => {
-      if (payload.eventType === "INSERT") setTrips(prev => [payload.new, ...prev]);
+      if (payload.eventType === "INSERT") setTrips(prev => prev.some(t => t.id === payload.new.id) ? prev : [payload.new, ...prev]);
       if (payload.eventType === "DELETE") setTrips(prev => prev.filter(t => t.id !== payload.old.id));
     });
     return unsub;
@@ -220,11 +220,11 @@ export default function App() {
     })();
     const unsub = subscribeTripData(activeTrip.id,
       (p) => {
-        if (p.eventType === "INSERT") setTripMembers(prev => [...prev, p.new]);
+        if (p.eventType === "INSERT") setTripMembers(prev => prev.some(m => m.id === p.new.id) ? prev : [...prev, p.new]);
         if (p.eventType === "DELETE") setTripMembers(prev => prev.filter(m => m.id !== p.old.id));
       },
       (p) => {
-        if (p.eventType === "INSERT") setTripExpenses(prev => [p.new, ...prev]);
+        if (p.eventType === "INSERT") setTripExpenses(prev => prev.some(e => e.id === p.new.id) ? prev : [p.new, ...prev]);
         if (p.eventType === "UPDATE") setTripExpenses(prev => prev.map(e => e.id === p.new.id ? p.new : e));
         if (p.eventType === "DELETE") setTripExpenses(prev => prev.filter(e => e.id !== p.old.id));
       }
@@ -241,6 +241,7 @@ export default function App() {
 
   const handleDeleteTrip = useCallback(async (id) => {
     await sbDeleteTrip(id);
+    setTrips(prev => prev.filter(t => t.id !== id));
     if (activeTrip?.id === id) setActiveTrip(null);
     setConfirmDelTrip(null);
   }, [activeTrip]);
@@ -308,13 +309,15 @@ export default function App() {
 
   const handleDeleteExpense = useCallback(async (id) => {
     await deleteExpense(id);
+    setTripExpenses(prev => prev.filter(e => e.id !== id));
     if (expandedExp === id) setExpandedExp(null);
     if (editingExp?.id === id) setEditingExp(null);
   }, [expandedExp, editingExp]);
 
   const handleEditExpense = useCallback(async () => {
     if (!editingExp || !editingExp.name.trim() || !editingExp.amount || !editingExp.paidBy || editingExp.splitAmong.length === 0) return;
-    await updateExpense(editingExp.id, { name: editingExp.name.trim(), amount: parseFloat(editingExp.amount), paidBy: editingExp.paidBy, splitAmong: editingExp.splitAmong, notes: editingExp.notes });
+    const updated = await updateExpense(editingExp.id, { name: editingExp.name.trim(), amount: parseFloat(editingExp.amount), paidBy: editingExp.paidBy, splitAmong: editingExp.splitAmong, notes: editingExp.notes });
+    if (updated) setTripExpenses(prev => prev.map(e => e.id === updated.id ? updated : e));
     setEditingExp(null);
     setExpandedExp(null);
   }, [editingExp]);
@@ -575,9 +578,9 @@ export default function App() {
           {!activeTrip ? (
             <>
               {trips.length === 0 && !newTripOpen && (
-                <div style={{ textAlign: "center", padding: "40px 20px" }}>
-                  <div style={{ fontSize: 28, marginBottom: 8 }}>Split expenses</div>
-                  <div style={{ fontSize: 13, color: UI.text2, lineHeight: 1.6, maxWidth: 280, margin: "0 auto" }}>Create a trip to start tracking group expenses and settling up.</div>
+                <div style={{ textAlign: "center", padding: "48px 20px" }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: UI.text, marginBottom: 6 }}>No trips yet</div>
+                  <div style={{ fontSize: 12, color: UI.text3, lineHeight: 1.6, maxWidth: 240, margin: "0 auto" }}>Create a trip to split expenses with your group.</div>
                 </div>
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
