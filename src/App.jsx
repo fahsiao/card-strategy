@@ -75,6 +75,8 @@ const DEFAULT_PROGS = [
   { id: "ur-c", label: "Chase UR (Christine CSP + Freedom)", value: 0, color: C.chase, sys: true, updated: null },
   { id: "mr", label: "AMEX MR (Gold)", value: 0, color: C.amex, sys: true, updated: null },
 ];
+const TRIP_COLORS = [C.chase, C.amex, C.green, C.purple, C.teal, C.coral];
+const tripColor = (i) => TRIP_COLORS[i % TRIP_COLORS.length];
 const SORT_ORDER = { "ur-e": 0, "ur-c": 1, "mr": 2 };
 const sortProgs = (arr) => [...arr].sort((a, b) => (SORT_ORDER[a.id] ?? 99) - (SORT_ORDER[b.id] ?? 99));
 const SYS_COLORS = { "ur-e": C.chase, "ur-c": C.chase, "mr": C.amex };
@@ -139,6 +141,8 @@ export default function App() {
   const [expForm, setExpForm] = useState({ name: "", amount: "", paidBy: "", splitAmong: [], notes: "" });
   const [expFormOpen, setExpFormOpen] = useState(false);
   const [confirmDelTrip, setConfirmDelTrip] = useState(null);
+  const [expandedExp, setExpandedExp] = useState(null);
+  const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => { (async () => {
     const [balData, turnsData, tripsData] = await Promise.all([getBalances(), getTurns(), getTrips()]);
@@ -299,7 +303,7 @@ export default function App() {
   const urUpdated = urProgs.filter(p => p.updated).sort((a, b) => new Date(b.updated) - new Date(a.updated))[0]?.updated;
   const mrUpdated = mrProgs.filter(p => p.updated).sort((a, b) => new Date(b.updated) - new Date(a.updated))[0]?.updated;
   const totalFee = [...CARDS_ERIC, ...CARDS_CHRISTINE].reduce((s, c) => s + c.fee, 0);
-  const tabs = [{ id: "swipe", l: "Swipe" }, { id: "turns", l: "Turns" }, { id: "trip", l: "Trips" }, { id: "split", l: "Split" }, { id: "balances", l: "Points" }, { id: "cards", l: "Cards" }];
+  const tabs = [{ id: "swipe", l: "Swipe" }, { id: "turns", l: "Turns" }, { id: "trip", l: "Book" }, { id: "split", l: "Split" }, { id: "balances", l: "Points" }, { id: "cards", l: "Cards" }];
 
   if (!loaded) return <div style={{ fontFamily: display, background: UI.bg, color: UI.text3, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ fontSize: 13, opacity: 0.5 }}>Loading...</div></div>;
 
@@ -522,12 +526,13 @@ export default function App() {
                 </div>
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {trips.map(t => {
+                {trips.map((t, ti) => {
                   const isConfirming = confirmDelTrip === t.id;
+                  const tc = tripColor(ti);
                   return (
-                    <div key={t.id} onClick={() => !isConfirming && setActiveTrip(t)} style={{ background: `linear-gradient(160deg, ${UI.bg2}, ${UI.bg3})`, border: `1px solid ${UI.border}`, borderRadius: 12, padding: "16px 18px", cursor: "pointer", transition: "border-color .2s" }}>
+                    <div key={t.id} onClick={() => !isConfirming && setActiveTrip(t)} style={{ background: `linear-gradient(160deg, ${UI.bg2}, ${UI.bg3})`, border: `1px solid ${UI.border}`, borderLeft: `3px solid ${tc}`, borderRadius: 12, padding: "16px 18px", cursor: "pointer", transition: "border-color .2s" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div style={{ fontSize: 15, fontWeight: 600 }}>{t.name}</div>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: tc }}>{t.name}</div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontSize: 10, color: UI.text3, fontFamily: mono }}>{new Date(t.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
                           <button onClick={(e) => { e.stopPropagation(); setConfirmDelTrip(isConfirming ? null : t.id); }} style={{ background: "none", border: "none", color: isConfirming ? C.red : UI.text3, cursor: "pointer", fontSize: 14, padding: "0 4px", fontFamily: display }}>×</button>
@@ -678,21 +683,55 @@ export default function App() {
                 {/* Expenses list */}
                 {tripExpenses.length > 0 && (
                   <div>
-                    <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: UI.text3, marginBottom: 8 }}>Expenses</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      {tripExpenses.map((e, i) => (
-                        <div key={e.id} style={{ display: "flex", alignItems: "center", padding: "10px 12px", borderRadius: 8, background: i % 2 === 0 ? "transparent" : UI.bg2, gap: 10 }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</div>
-                            <div style={{ fontSize: 10, color: UI.text3, marginTop: 2 }}>
-                              <span style={{ fontWeight: 500, color: UI.text2 }}>{e.paid_by}</span> paid · split {(e.split_among || []).length}
-                              {e.notes && <span> · {e.notes}</span>}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: UI.text3 }}>Expenses</div>
+                      <button onClick={() => setShowDetail(!showDetail)} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 6, padding: "3px 10px", color: showDetail ? C.chase : UI.text3, fontSize: 10, fontFamily: display, fontWeight: 500, cursor: "pointer", transition: "all .15s" }}>{showDetail ? "Hide" : "Details"}</button>
+                    </div>
+                    {showDetail && (
+                      <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(tripMembers.length, 3)}, 1fr)`, gap: 6, marginBottom: 12 }}>
+                        {tripMembers.map(m => {
+                          const paid = tripExpenses.filter(e => e.paid_by === m.name).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+                          const owed = tripExpenses.reduce((s, e) => { const split = e.split_among || []; return s + (split.includes(m.name) ? (parseFloat(e.amount) || 0) / split.length : 0); }, 0);
+                          return (
+                            <div key={m.id} style={{ background: `linear-gradient(160deg, ${UI.bg2}, ${UI.bg3})`, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "10px 10px" }}>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: UI.text, marginBottom: 6 }}>{m.name}</div>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: UI.text3, marginBottom: 2 }}><span>Paid</span><span style={{ fontFamily: mono, color: UI.text2, fontWeight: 500 }}>${paid.toFixed(2)}</span></div>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: UI.text3 }}><span>Owes</span><span style={{ fontFamily: mono, color: UI.text2, fontWeight: 500 }}>${owed.toFixed(2)}</span></div>
                             </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      {tripExpenses.map((e, i) => {
+                        const isOpen = expandedExp === e.id;
+                        const split = e.split_among || [];
+                        const perPerson = split.length > 0 ? parseFloat(e.amount) / split.length : 0;
+                        return (
+                          <div key={e.id} onClick={() => setExpandedExp(isOpen ? null : e.id)} style={{ padding: "10px 12px", borderRadius: 8, background: i % 2 === 0 ? "transparent" : UI.bg2, cursor: "pointer", transition: "all .15s" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</div>
+                                <div style={{ fontSize: 10, color: UI.text3, marginTop: 2 }}>
+                                  <span style={{ fontWeight: 500, color: UI.text2 }}>{e.paid_by}</span> paid · {split.join(", ")}
+                                </div>
+                              </div>
+                              <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap" }}>${parseFloat(e.amount).toFixed(2)}</div>
+                            </div>
+                            {isOpen && (
+                              <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${UI.border}` }}>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: e.notes ? 8 : 6 }}>
+                                  {split.map(name => (
+                                    <span key={name} style={{ fontSize: 10, background: UI.bg3, border: `1px solid ${UI.border}`, borderRadius: 12, padding: "3px 8px", color: UI.text2 }}>{name} · <span style={{ fontFamily: mono, fontWeight: 500 }}>${perPerson.toFixed(2)}</span></span>
+                                  ))}
+                                </div>
+                                {e.notes && <div style={{ fontSize: 11, color: UI.text3, marginBottom: 6 }}>{e.notes}</div>}
+                                <button onClick={(ev) => { ev.stopPropagation(); handleDeleteExpense(e.id); }} style={{ background: `${C.red}10`, border: `1px solid ${C.red}30`, borderRadius: 6, padding: "4px 12px", color: C.red, fontSize: 10, fontFamily: display, fontWeight: 500, cursor: "pointer" }}>Delete</button>
+                              </div>
+                            )}
                           </div>
-                          <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap" }}>${parseFloat(e.amount).toFixed(2)}</div>
-                          <button onClick={() => handleDeleteExpense(e.id)} style={{ background: "none", border: "none", color: UI.text3, cursor: "pointer", fontSize: 14, padding: "0 2px", fontFamily: display }}>×</button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -773,20 +812,17 @@ export default function App() {
             <div style={{ fontFamily: mono, fontSize: 13, color: UI.text3 }}>Total: <span style={{ fontWeight: 700, color: UI.text }}>${totalFee.toLocaleString()}/yr</span></div>
           </div>
           <Note><strong style={{ color: UI.text }}>Strategy changes:</strong> Adding or removing cards affects the swipe guide. Come back to Claude for re-evaluation and redeploy.</Note>
+          <div style={{ marginTop: 22, borderTop: `1px solid ${UI.border}`, paddingTop: 14 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: UI.text3, marginBottom: 8 }}>Key dates</div>
+            {KEY_DATES.map((d, i) => (
+              <div key={i} style={{ display: "flex", gap: 12, padding: "5px 0", borderBottom: i < KEY_DATES.length - 1 ? `1px solid ${UI.border}` : "none", fontSize: 12, alignItems: "baseline" }}>
+                <span style={{ fontFamily: mono, fontWeight: 600, color: d.c, minWidth: 68, fontSize: 10 }}>{d.d}</span>
+                <span style={{ color: UI.text2 }}>{d.w}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
-
-      {/* FOOTER */}
-      <div style={{ marginTop: 28, borderTop: `1px solid ${UI.border}`, paddingTop: 14 }}>
-        <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: UI.text3, marginBottom: 8 }}>Key dates</div>
-        {KEY_DATES.map((d, i) => (
-          <div key={i} style={{ display: "flex", gap: 12, padding: "5px 0", borderBottom: i < KEY_DATES.length - 1 ? `1px solid ${UI.border}` : "none", fontSize: 12, alignItems: "baseline" }}>
-            <span style={{ fontFamily: mono, fontWeight: 600, color: d.c, minWidth: 68, fontSize: 10 }}>{d.d}</span>
-            <span style={{ color: UI.text2 }}>{d.w}</span>
-          </div>
-        ))}
-      </div>
-      <div style={{ textAlign: "center", color: UI.text3, fontSize: 9, paddingTop: 16, letterSpacing: 0.3 }}>Partners verified Mar 2026</div>
     </div>
   );
 }
