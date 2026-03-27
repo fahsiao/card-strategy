@@ -144,6 +144,7 @@ export default function App() {
   const [expandedExp, setExpandedExp] = useState(null);
   const [editingExp, setEditingExp] = useState(null);
   const [editingTripName, setEditingTripName] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => { (async () => {
@@ -233,11 +234,13 @@ export default function App() {
   }, [activeTrip]);
 
   const handleCreateTrip = useCallback(async () => {
-    if (!newTripName.trim()) return;
+    if (!newTripName.trim() || submitting) return;
+    setSubmitting(true);
     const t = await createTrip(newTripName.trim());
     if (t) setActiveTrip(t);
     setNewTripName(""); setNewTripOpen(false);
-  }, [newTripName]);
+    setSubmitting(false);
+  }, [newTripName, submitting]);
 
   const handleDeleteTrip = useCallback(async (id) => {
     await sbDeleteTrip(id);
@@ -247,10 +250,12 @@ export default function App() {
   }, [activeTrip]);
 
   const handleAddMember = useCallback(async () => {
-    if (!newMemberName.trim() || !activeTrip) return;
+    if (!newMemberName.trim() || !activeTrip || submitting) return;
+    setSubmitting(true);
     await addTripMember(activeTrip.id, newMemberName.trim());
     setNewMemberName(""); setNewMemberOpen(false);
-  }, [newMemberName, activeTrip]);
+    setSubmitting(false);
+  }, [newMemberName, activeTrip, submitting]);
 
   const [confirmRemoveMember, setConfirmRemoveMember] = useState(null);
 
@@ -301,11 +306,13 @@ export default function App() {
   }, [editingTripName, activeTrip]);
 
   const handleAddExpense = useCallback(async () => {
-    if (!expForm.name.trim() || !expForm.amount || !expForm.paidBy || expForm.splitAmong.length === 0 || !activeTrip) return;
+    if (!expForm.name.trim() || !expForm.amount || !expForm.paidBy || expForm.splitAmong.length === 0 || !activeTrip || submitting) return;
+    setSubmitting(true);
     await addExpense({ tripId: activeTrip.id, name: expForm.name.trim(), amount: parseFloat(expForm.amount), paidBy: expForm.paidBy, splitAmong: expForm.splitAmong, notes: expForm.notes });
     setExpForm({ name: "", amount: "", paidBy: "", splitAmong: tripMembers.map(m => m.name), notes: "" });
     setExpFormOpen(false);
-  }, [expForm, activeTrip, tripMembers]);
+    setSubmitting(false);
+  }, [expForm, activeTrip, tripMembers, submitting]);
 
   const handleDeleteExpense = useCallback(async (id) => {
     await deleteExpense(id);
@@ -315,12 +322,14 @@ export default function App() {
   }, [expandedExp, editingExp]);
 
   const handleEditExpense = useCallback(async () => {
-    if (!editingExp || !editingExp.name.trim() || !editingExp.amount || !editingExp.paidBy || editingExp.splitAmong.length === 0) return;
+    if (!editingExp || !editingExp.name.trim() || !editingExp.amount || !editingExp.paidBy || editingExp.splitAmong.length === 0 || submitting) return;
+    setSubmitting(true);
     const updated = await updateExpense(editingExp.id, { name: editingExp.name.trim(), amount: parseFloat(editingExp.amount), paidBy: editingExp.paidBy, splitAmong: editingExp.splitAmong, notes: editingExp.notes });
     if (updated) setTripExpenses(prev => prev.map(e => e.id === updated.id ? updated : e));
     setEditingExp(null);
     setExpandedExp(null);
-  }, [editingExp]);
+    setSubmitting(false);
+  }, [editingExp, submitting]);
 
   const calcSettlement = (members, expenses) => {
     const nets = {};
