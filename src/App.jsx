@@ -150,6 +150,8 @@ export default function App() {
   const [turnsView, setTurnsView] = useState("turns");
   const [grocItems, setGrocItems] = useState([]);
   const [newGrocItem, setNewGrocItem] = useState("");
+  const [editingGroc, setEditingGroc] = useState(null);
+  const [confirmClearGroc, setConfirmClearGroc] = useState(false);
 
   useEffect(() => { (async () => {
     const [balData, turnsData, tripsData, grocData] = await Promise.all([getBalances(), getTurns(), getTrips(), getGroceryItems()]);
@@ -227,7 +229,7 @@ export default function App() {
   }, [newGrocItem, submitting]);
   const handleToggleGroc = useCallback(async (id, checked) => {
     setGrocItems(prev => prev.map(g => g.id === id ? { ...g, checked: !checked } : g));
-    await updateGroceryItem(id, !checked);
+    await updateGroceryItem(id, { checked: !checked });
   }, []);
   const handleDeleteGroc = useCallback(async (id) => {
     setGrocItems(prev => prev.filter(g => g.id !== id));
@@ -235,7 +237,14 @@ export default function App() {
   }, []);
   const handleClearChecked = useCallback(async () => {
     setGrocItems(prev => prev.filter(g => !g.checked));
+    setConfirmClearGroc(false);
     await clearCheckedGrocery();
+  }, []);
+  const handleEditGroc = useCallback(async (id, name) => {
+    if (!name.trim()) return;
+    setGrocItems(prev => prev.map(g => g.id === id ? { ...g, name: name.trim() } : g));
+    setEditingGroc(null);
+    await updateGroceryItem(id, { name: name.trim() });
   }, []);
 
   // Split tab: subscribe to trips list
@@ -491,12 +500,26 @@ export default function App() {
             const checked = grocItems.filter(g => g.checked);
             return (
               <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: confirmClearGroc ? 8 : 12 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, fontFamily: display }}>Grocery List</div>
-                  {checked.length > 0 && (
-                    <button onClick={handleClearChecked} style={{ background: "none", border: `1px solid ${C.red}40`, borderRadius: 6, padding: "4px 10px", color: C.red, fontSize: 10, fontFamily: display, fontWeight: 500, cursor: "pointer" }}>Clear checked</button>
-                  )}
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {checked.length > 0 && (
+                      <button onClick={handleClearChecked} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 6, padding: "4px 10px", color: UI.text3, fontSize: 10, fontFamily: display, fontWeight: 500, cursor: "pointer" }}>Clear checked</button>
+                    )}
+                    {grocItems.length > 0 && (
+                      <button onClick={() => setConfirmClearGroc(true)} style={{ background: "none", border: `1px solid ${C.red}40`, borderRadius: 6, padding: "4px 10px", color: C.red, fontSize: 10, fontFamily: display, fontWeight: 500, cursor: "pointer" }}>Clear all</button>
+                    )}
+                  </div>
                 </div>
+                {confirmClearGroc && (
+                  <div style={{ background: `${C.red}0C`, border: `1px solid ${C.red}30`, borderRadius: 10, padding: "10px 14px", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: C.red }}>Clear entire list?</span>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button onClick={async () => { setGrocItems([]); setConfirmClearGroc(false); for (const g of grocItems) await deleteGroceryItem(g.id); }} style={{ background: C.red, border: "none", borderRadius: 6, padding: "5px 12px", color: "#fff", fontSize: 11, fontWeight: 600, fontFamily: display, cursor: "pointer" }}>Confirm</button>
+                      <button onClick={() => setConfirmClearGroc(false)} style={{ background: "none", border: `1px solid ${UI.border}`, borderRadius: 6, padding: "5px 10px", color: UI.text3, fontSize: 11, fontFamily: display, cursor: "pointer" }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
 
                 <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
                   <input
@@ -528,7 +551,17 @@ export default function App() {
                           width: 22, height: 22, minWidth: 22, borderRadius: "50%", border: `2px solid ${UI.text3}`,
                           cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s"
                         }} />
-                        <div style={{ flex: 1, fontSize: 14, fontFamily: display, fontWeight: 500, color: UI.text }}>{g.name}</div>
+                        {editingGroc === g.id ? (
+                          <input
+                            autoFocus
+                            defaultValue={g.name}
+                            onBlur={e => handleEditGroc(g.id, e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter") handleEditGroc(g.id, e.target.value); if (e.key === "Escape") setEditingGroc(null); }}
+                            style={{ flex: 1, background: UI.bg, border: `1px solid ${UI.borderLight}`, borderRadius: 6, padding: "4px 8px", color: UI.text, fontFamily: display, fontSize: 14, fontWeight: 500, outline: "none" }}
+                          />
+                        ) : (
+                          <div onClick={() => setEditingGroc(g.id)} style={{ flex: 1, fontSize: 14, fontFamily: display, fontWeight: 500, color: UI.text, cursor: "pointer" }}>{g.name}</div>
+                        )}
                         <button onClick={() => handleDeleteGroc(g.id)} style={{ background: "none", border: "none", color: UI.text3, fontSize: 14, cursor: "pointer", padding: "2px 4px", lineHeight: 1 }}>×</button>
                       </div>
                     ))}

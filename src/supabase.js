@@ -207,9 +207,9 @@ export async function addGroceryItem(name) {
   return data
 }
 
-export async function updateGroceryItem(id, checked) {
+export async function updateGroceryItem(id, fields) {
   if (!supabase) return null
-  const { data, error } = await supabase.from('grocery_items').update({ checked }).eq('id', id).select().single()
+  const { data, error } = await supabase.from('grocery_items').update(fields).eq('id', id).select().single()
   if (error) { console.error('updateGroceryItem error:', error); return null }
   return data
 }
