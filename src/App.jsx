@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getBalances, upsertBalance, deleteBalance, subscribeBalances, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, subscribeTurns, getTrips, createTrip, updateTrip, deleteTrip as sbDeleteTrip, getTripMembers, addTripMember, removeTripMember, getExpenses, addExpense, updateExpense, deleteExpense, subscribeTrips, subscribeTripData } from "./supabase";
+import { getBalances, upsertBalance, deleteBalance, subscribeBalances, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, subscribeTurns, getTrips, createTrip, updateTrip, deleteTrip as sbDeleteTrip, getTripMembers, addTripMember, removeTripMember, getExpenses, addExpense, updateExpense, deleteExpense, subscribeTrips, subscribeTripData, getGroceryItems, addGroceryItem, updateGroceryItem, deleteGroceryItem, clearCheckedGrocery, subscribeGrocery } from "./supabase";
 
 const C = { chase: "#6BAAED", amex: "#E4B94E", green: "#6DD4A0", red: "#E88080", purple: "#B699E8", teal: "#5CD4BE", coral: "#E89678" };
 const UI = { bg: "#0C0C0B", bg2: "#141413", bg3: "#1C1C1A", bg4: "#252523", border: "#2A2A27", borderLight: "#353532", text: "#F2F1EE", text2: "#B0AFA9", text3: "#706F6A" };
@@ -146,12 +146,17 @@ export default function App() {
   const [editingTripName, setEditingTripName] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
+  // Grocery list state
+  const [turnsView, setTurnsView] = useState("turns");
+  const [grocItems, setGrocItems] = useState([]);
+  const [newGrocItem, setNewGrocItem] = useState("");
 
   useEffect(() => { (async () => {
-    const [balData, turnsData, tripsData] = await Promise.all([getBalances(), getTurns(), getTrips()]);
+    const [balData, turnsData, tripsData, grocData] = await Promise.all([getBalances(), getTurns(), getTrips(), getGroceryItems()]);
     if (balData && balData.length > 0) { setProgs(sortProgs(balData.map(fromDB))); setSynced(true); }
     if (turnsData) setTurns(turnsData);
     if (tripsData) setTrips(tripsData);
+    if (grocData) setGrocItems(grocData);
     setLoaded(true);
   })(); }, []);
 
@@ -170,6 +175,15 @@ export default function App() {
     const unsub = subscribeTurns((payload) => {
       if (payload.eventType === "INSERT") setTurns(prev => [payload.new, ...prev].slice(0, 50));
       if (payload.eventType === "DELETE") setTurns(prev => prev.filter(t => t.id !== payload.old.id));
+    });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    const unsub = subscribeGrocery((payload) => {
+      if (payload.eventType === "INSERT") setGrocItems(prev => prev.some(g => g.id === payload.new.id) ? prev : [...prev, payload.new]);
+      if (payload.eventType === "UPDATE") setGrocItems(prev => prev.map(g => g.id === payload.new.id ? payload.new : g));
+      if (payload.eventType === "DELETE") setGrocItems(prev => prev.filter(g => g.id !== payload.old.id));
     });
     return unsub;
   }, []);
@@ -202,6 +216,27 @@ export default function App() {
   const getTurnCounts = (bucket) => { const bt = turns.filter(t => t.bucket === bucket); const eric = bt.filter(t => t.person === "Eric").length; const christine = bt.filter(t => t.person === "Christine").length; return { eric, christine, diff: Math.abs(eric - christine) }; };
   const getNextPerson = (bucket) => { const c = getTurnCounts(bucket); if (c.eric === 0 && c.christine === 0) return null; if (c.eric === c.christine) return null; return c.eric > c.christine ? "Christine" : "Eric"; };
   const getHistory = (bucket) => turns.filter(t => t.bucket === bucket).slice(0, 5);
+
+  // Grocery handlers
+  const handleAddGroc = useCallback(async () => {
+    if (!newGrocItem.trim() || submitting) return;
+    setSubmitting(true);
+    await addGroceryItem(newGrocItem.trim());
+    setNewGrocItem("");
+    setSubmitting(false);
+  }, [newGrocItem, submitting]);
+  const handleToggleGroc = useCallback(async (id, checked) => {
+    setGrocItems(prev => prev.map(g => g.id === id ? { ...g, checked: !checked } : g));
+    await updateGroceryItem(id, !checked);
+  }, []);
+  const handleDeleteGroc = useCallback(async (id) => {
+    setGrocItems(prev => prev.filter(g => g.id !== id));
+    await deleteGroceryItem(id);
+  }, []);
+  const handleClearChecked = useCallback(async () => {
+    setGrocItems(prev => prev.filter(g => !g.checked));
+    await clearCheckedGrocery();
+  }, []);
 
   // Split tab: subscribe to trips list
   useEffect(() => {
@@ -440,7 +475,90 @@ export default function App() {
       {/* TURNS */}
       {tab === "turns" && (
         <div className="tab-content" style={{ paddingTop: 18 }}>
-          {[
+          <div style={{ display: "flex", gap: 0, background: UI.bg2, border: `1px solid ${UI.border}`, borderRadius: 8, padding: 3, marginBottom: 14 }}>
+            {[{ id: "turns", l: "Turns" }, { id: "list", l: "List" }].map(v => (
+              <button key={v.id} onClick={() => setTurnsView(v.id)} style={{
+                flex: 1, padding: "6px 0", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                border: "none", cursor: "pointer", fontFamily: display, textAlign: "center",
+                background: turnsView === v.id ? UI.bg4 : "transparent",
+                color: turnsView === v.id ? UI.text : UI.text3, transition: "all .2s"
+              }}>{v.l}{v.id === "list" && grocItems.filter(g => !g.checked).length > 0 ? ` (${grocItems.filter(g => !g.checked).length})` : ""}</button>
+            ))}
+          </div>
+
+          {turnsView === "list" && (() => {
+            const unchecked = grocItems.filter(g => !g.checked);
+            const checked = grocItems.filter(g => g.checked);
+            return (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, fontFamily: display }}>Grocery List</div>
+                  {checked.length > 0 && (
+                    <button onClick={handleClearChecked} style={{ background: "none", border: `1px solid ${C.red}40`, borderRadius: 6, padding: "4px 10px", color: C.red, fontSize: 10, fontFamily: display, fontWeight: 500, cursor: "pointer" }}>Clear checked</button>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                  <input
+                    value={newGrocItem}
+                    onChange={e => setNewGrocItem(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleAddGroc()}
+                    placeholder="Add item..."
+                    style={{ flex: 1, background: UI.bg, border: `1px solid ${UI.border}`, borderRadius: 8, padding: "10px 12px", color: UI.text, fontFamily: display, fontSize: 14, outline: "none" }}
+                  />
+                  <button onClick={handleAddGroc} disabled={submitting || !newGrocItem.trim()} style={{
+                    background: newGrocItem.trim() ? `linear-gradient(160deg, ${C.green}30, ${C.green}15)` : UI.bg2,
+                    border: `1px solid ${newGrocItem.trim() ? `${C.green}40` : UI.border}`, borderRadius: 8,
+                    padding: "10px 16px", color: newGrocItem.trim() ? C.green : UI.text3, fontSize: 13, fontWeight: 600,
+                    fontFamily: display, cursor: newGrocItem.trim() ? "pointer" : "default", transition: "all .15s"
+                  }}>+</button>
+                </div>
+
+                {grocItems.length === 0 && (
+                  <div style={{ textAlign: "center", padding: "40px 20px", color: UI.text3 }}>
+                    <div style={{ fontSize: 13, fontFamily: display }}>Add items to your shared list</div>
+                  </div>
+                )}
+
+                {unchecked.length > 0 && (
+                  <div style={{ background: `linear-gradient(160deg, ${UI.bg2}, ${UI.bg3})`, border: `1px solid ${UI.border}`, borderRadius: 14, overflow: "hidden" }}>
+                    {unchecked.map((g, i) => (
+                      <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderBottom: i < unchecked.length - 1 ? `1px solid ${UI.border}` : "none" }}>
+                        <div onClick={() => handleToggleGroc(g.id, g.checked)} style={{
+                          width: 22, height: 22, minWidth: 22, borderRadius: "50%", border: `2px solid ${UI.text3}`,
+                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s"
+                        }} />
+                        <div style={{ flex: 1, fontSize: 14, fontFamily: display, fontWeight: 500, color: UI.text }}>{g.name}</div>
+                        <button onClick={() => handleDeleteGroc(g.id)} style={{ background: "none", border: "none", color: UI.text3, fontSize: 14, cursor: "pointer", padding: "2px 4px", lineHeight: 1 }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {checked.length > 0 && (
+                  <div style={{ marginTop: unchecked.length > 0 ? 14 : 0 }}>
+                    <div style={{ fontSize: 9, color: UI.text3, textTransform: "uppercase", letterSpacing: 1.5, fontWeight: 500, marginBottom: 6 }}>Checked</div>
+                    <div style={{ background: `linear-gradient(160deg, ${UI.bg2}, ${UI.bg3})`, border: `1px solid ${UI.border}`, borderRadius: 14, overflow: "hidden" }}>
+                      {checked.map((g, i) => (
+                        <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: i < checked.length - 1 ? `1px solid ${UI.border}` : "none", opacity: 0.45 }}>
+                          <div onClick={() => handleToggleGroc(g.id, g.checked)} style={{
+                            width: 22, height: 22, minWidth: 22, borderRadius: "50%", border: `2px solid ${C.green}`,
+                            background: C.green, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s"
+                          }}>
+                            <span style={{ color: "#fff", fontSize: 12, fontWeight: 700, lineHeight: 1 }}>✓</span>
+                          </div>
+                          <div style={{ flex: 1, fontSize: 14, fontFamily: display, fontWeight: 500, color: UI.text3, textDecoration: "line-through" }}>{g.name}</div>
+                          <button onClick={() => handleDeleteGroc(g.id)} style={{ background: "none", border: "none", color: UI.text3, fontSize: 14, cursor: "pointer", padding: "2px 4px", lineHeight: 1 }}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {turnsView === "turns" && [
             { bucket: "costco", label: "Costco", sub: "CSR or CSP, alternate" },
             { bucket: "meals", label: "Meals on personal CC", sub: "When not using AMEX Gold" },
           ].map((b, bi) => {
@@ -517,7 +635,7 @@ export default function App() {
               </div>
             );
           })}
-          <Note><strong style={{ color: UI.text }}>Big purchase?</strong> Tap 2-3x to weight it. $600 Costco = tap twice. Reset when you're both even.</Note>
+          <Note><strong style={{ color: UI.text }}>Big purchase?</strong> Tap 2-3x to weight it. $600 Costco = tap twice. Reset when you're both even.</Note>}
         </div>
       )}
 

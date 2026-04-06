@@ -191,6 +191,47 @@ export function subscribeTrips(callback) {
   return () => supabase.removeChannel(ch)
 }
 
+// ── GROCERY LIST ──────────────────────────────────
+
+export async function getGroceryItems() {
+  if (!supabase) return []
+  const { data, error } = await supabase.from('grocery_items').select('*').order('created_at', { ascending: true })
+  if (error) { console.error('getGroceryItems error:', error); return [] }
+  return data
+}
+
+export async function addGroceryItem(name) {
+  if (!supabase) return null
+  const { data, error } = await supabase.from('grocery_items').insert({ name }).select().single()
+  if (error) { console.error('addGroceryItem error:', error); return null }
+  return data
+}
+
+export async function updateGroceryItem(id, checked) {
+  if (!supabase) return null
+  const { data, error } = await supabase.from('grocery_items').update({ checked }).eq('id', id).select().single()
+  if (error) { console.error('updateGroceryItem error:', error); return null }
+  return data
+}
+
+export async function deleteGroceryItem(id) {
+  if (!supabase) return
+  const { error } = await supabase.from('grocery_items').delete().eq('id', id)
+  if (error) console.error('deleteGroceryItem error:', error)
+}
+
+export async function clearCheckedGrocery() {
+  if (!supabase) return
+  const { error } = await supabase.from('grocery_items').delete().eq('checked', true)
+  if (error) console.error('clearCheckedGrocery error:', error)
+}
+
+export function subscribeGrocery(callback) {
+  if (!supabase) return () => {}
+  const ch = supabase.channel('grocery-realtime').on('postgres_changes', { event: '*', schema: 'public', table: 'grocery_items' }, callback).subscribe()
+  return () => supabase.removeChannel(ch)
+}
+
 export function subscribeTripData(tripId, onMembers, onExpenses) {
   if (!supabase) return () => {}
   const ch = supabase.channel(`trip-${tripId}`)

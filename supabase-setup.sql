@@ -110,3 +110,20 @@ create policy "Allow all inserts on expenses" on public.expenses for insert with
 create policy "Allow all updates on expenses" on public.expenses for update using (true);
 create policy "Allow all deletes on expenses" on public.expenses for delete using (true);
 alter publication supabase_realtime add table public.expenses;
+
+-- ── GROCERY LIST ──────────────────────────────────
+
+-- 11. Grocery items table
+create table if not exists public.grocery_items (
+  id bigint generated always as identity primary key,
+  name text not null,
+  checked boolean default false,
+  created_at timestamptz default now()
+);
+
+alter table public.grocery_items enable row level security;
+create policy "Allow all reads on grocery_items" on public.grocery_items for select using (true);
+create policy "Allow all inserts on grocery_items" on public.grocery_items for insert with check (true);
+create policy "Allow all updates on grocery_items" on public.grocery_items for update using (true);
+create policy "Allow all deletes on grocery_items" on public.grocery_items for delete using (true);
+alter publication supabase_realtime add table public.grocery_items;
