@@ -558,7 +558,8 @@ export default function App() {
             );
           })()}
 
-          {turnsView === "turns" && [
+          {turnsView === "turns" && (<>
+          {[
             { bucket: "costco", label: "Costco", sub: "CSR or CSP, alternate" },
             { bucket: "meals", label: "Meals on personal CC", sub: "When not using AMEX Gold" },
           ].map((b, bi) => {
@@ -635,7 +636,8 @@ export default function App() {
               </div>
             );
           })}
-          <Note><strong style={{ color: UI.text }}>Big purchase?</strong> Tap 2-3x to weight it. $600 Costco = tap twice. Reset when you're both even.</Note>}
+          <Note><strong style={{ color: UI.text }}>Big purchase?</strong> Tap 2-3x to weight it. $600 Costco = tap twice. Reset when you're both even.</Note>
+          </>)}
         </div>
       )}
 
