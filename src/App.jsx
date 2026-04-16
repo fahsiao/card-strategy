@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { getBalances, upsertBalance, deleteBalance, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, getTrips, createTrip, updateTrip, deleteTrip as sbDeleteTrip, getTripMembers, addTripMember, removeTripMember, getExpenses, addExpense, updateExpense, deleteExpense, getGroceryItems, addGroceryItem, updateGroceryItem, deleteGroceryItem, clearCheckedGrocery } from "./api";
 
 const C = { chase: "#6BAAED", amex: "#E4B94E", green: "#6DD4A0", red: "#E88080", purple: "#B699E8", teal: "#5CD4BE", coral: "#E89678" };
@@ -127,6 +127,11 @@ export default function App() {
   const [confirmReset, setConfirmReset] = useState(null);
   const [synced, setSynced] = useState(false);
   const pollRef = useRef(null);
+  const [pullY, setPullY] = useState(0);
+  const [pulling, setPulling] = useState(false);
+  const [pullReleased, setPullReleased] = useState(false);
+  const pullStart = useMemo(() => ({y:0}), []);
+  const PULL_THRESHOLD = 80;
   const tabRef = useRef(null);
   const [pillStyle, setPillStyle] = useState({});
   // Split tab state
@@ -176,6 +181,17 @@ export default function App() {
     document.addEventListener('visibilitychange', onVis);
     return () => { clearInterval(pollRef.current); document.removeEventListener('visibilitychange', onVis); };
   }, []);
+
+  const doRefresh = useCallback(async () => {
+    const [balData, turnsData, tripsData, grocData] = await Promise.all([getBalances(), getTurns(), getTrips(), getGroceryItems()]);
+    if (balData) setProgs(sortProgs(balData.map(fromDB)));
+    if (turnsData) setTurns(turnsData);
+    if (tripsData) setTrips(tripsData);
+    if (grocData) setGrocItems(grocData);
+  }, []);
+  const onTouchStart = useCallback((e) => { if (window.scrollY === 0) pullStart.y = e.touches[0].clientY; else pullStart.y = 0; }, []);
+  const onTouchMove = useCallback((e) => { if (!pullStart.y) return; const dy = e.touches[0].clientY - pullStart.y; if (dy > 0) { setPullY(Math.sqrt(dy) * 4); setPulling(true); } else { setPullY(0); setPulling(false); } }, []);
+  const onTouchEnd = useCallback(() => { if (pullY >= PULL_THRESHOLD) { setPullReleased(true); doRefresh(); setTimeout(() => { setPullY(0); setPulling(false); setPullReleased(false); }, 1200); } else { setPullY(0); setPulling(false); } pullStart.y = 0; }, [pullY, doRefresh]);
 
   // Animated pill - recalculate after font load
   useEffect(() => {
@@ -398,7 +414,13 @@ export default function App() {
   if (!loaded) return <div style={{ fontFamily: display, background: UI.bg, color: UI.text3, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ fontSize: 13, opacity: 0.5 }}>Loading...</div></div>;
 
   return (
-    <div style={{ fontFamily: display, background: UI.bg, color: UI.text, minHeight: "100vh", padding: "20px 18px 24px", maxWidth: 840, margin: "0 auto", lineHeight: 1.55 }}>
+    <div style={{ fontFamily: display, background: UI.bg, color: UI.text, minHeight: "100vh", padding: "20px 18px 24px", maxWidth: 840, margin: "0 auto", lineHeight: 1.55 }} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+      {pulling && !pullReleased && <div style={{ position: "fixed", top: 0, left: 0, right: 0, display: "flex", justifyContent: "center", paddingTop: Math.min(pullY, 60), zIndex: 300, pointerEvents: "none" }}>
+        <span style={{ fontSize: 10, fontFamily: display, fontWeight: 600, color: pullY >= PULL_THRESHOLD ? C.chase : UI.text3, opacity: Math.min(1, pullY / 40), transition: "color 0.2s" }}>{pullY >= PULL_THRESHOLD ? "Release to sync" : "Pull to sync"}</span>
+      </div>}
+      {pullReleased && <div style={{ position: "fixed", top: 0, left: 0, right: 0, display: "flex", justifyContent: "center", paddingTop: 20, zIndex: 300, pointerEvents: "none" }}>
+        <span style={{ fontSize: 10, fontFamily: display, fontWeight: 600, color: C.chase, opacity: 0.8 }}>Syncing...</span>
+      </div>}
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
       <style>{`
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
