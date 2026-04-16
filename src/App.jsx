@@ -130,6 +130,7 @@ export default function App() {
   const [pullY, setPullY] = useState(0);
   const [pulling, setPulling] = useState(false);
   const [pullReleased, setPullReleased] = useState(false);
+  const [pullDone, setPullDone] = useState(false);
   const pullStart = useMemo(() => ({y:0}), []);
   const PULL_THRESHOLD = 80;
   const tabRef = useRef(null);
@@ -191,7 +192,7 @@ export default function App() {
   }, []);
   const onTouchStart = useCallback((e) => { if (window.scrollY === 0) pullStart.y = e.touches[0].clientY; else pullStart.y = 0; }, []);
   const onTouchMove = useCallback((e) => { if (!pullStart.y) return; const dy = e.touches[0].clientY - pullStart.y; if (dy > 0) { setPullY(Math.sqrt(dy) * 4); setPulling(true); } else { setPullY(0); setPulling(false); } }, []);
-  const onTouchEnd = useCallback(() => { if (pullY >= PULL_THRESHOLD) { setPullReleased(true); doRefresh(); setTimeout(() => { setPullY(0); setPulling(false); setPullReleased(false); }, 1200); } else { setPullY(0); setPulling(false); } pullStart.y = 0; }, [pullY, doRefresh]);
+  const onTouchEnd = useCallback(() => { if (pullY >= PULL_THRESHOLD) { setPullReleased(true); setPullDone(false); doRefresh().then(() => { setPullDone(true); setTimeout(() => { setPullY(0); setPulling(false); setPullReleased(false); setPullDone(false); }, 800); }); } else { setPullY(0); setPulling(false); } pullStart.y = 0; }, [pullY, doRefresh]);
 
   // Animated pill - recalculate after font load
   useEffect(() => {
@@ -419,7 +420,7 @@ export default function App() {
         <span style={{ fontSize: 10, fontFamily: display, fontWeight: 600, color: pullY >= PULL_THRESHOLD ? C.chase : UI.text3, opacity: Math.min(1, pullY / 40), transition: "color 0.2s" }}>{pullY >= PULL_THRESHOLD ? "Release to sync" : "Pull to sync"}</span>
       </div>}
       {pullReleased && <div style={{ position: "fixed", top: 0, left: 0, right: 0, display: "flex", justifyContent: "center", paddingTop: 20, zIndex: 300, pointerEvents: "none" }}>
-        <span style={{ fontSize: 10, fontFamily: display, fontWeight: 600, color: C.chase, opacity: 0.8 }}>Syncing...</span>
+        <span style={{ fontSize: 10, fontFamily: display, fontWeight: 600, color: pullDone ? C.green : C.chase, opacity: 0.8, transition: "color 0.2s" }}>{pullDone ? "Synced ✓" : "Syncing..."}</span>
       </div>}
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
       <style>{`
