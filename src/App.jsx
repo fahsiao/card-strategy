@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getBalances, upsertBalance, deleteBalance, subscribeBalances, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, subscribeTurns, getTrips, createTrip, updateTrip, deleteTrip as sbDeleteTrip, getTripMembers, addTripMember, removeTripMember, getExpenses, addExpense, updateExpense, deleteExpense, subscribeTrips, subscribeTripData, getGroceryItems, addGroceryItem, updateGroceryItem, deleteGroceryItem, clearCheckedGrocery, subscribeGrocery } from "./supabase";
+import { getBalances, upsertBalance, deleteBalance, getTurns, logTurn as sbLogTurn, deleteTurn as sbDeleteTurn, getTrips, createTrip, updateTrip, deleteTrip as sbDeleteTrip, getTripMembers, addTripMember, removeTripMember, getExpenses, addExpense, updateExpense, deleteExpense, getGroceryItems, addGroceryItem, updateGroceryItem, deleteGroceryItem, clearCheckedGrocery } from "./api";
 
 const C = { chase: "#6BAAED", amex: "#E4B94E", green: "#6DD4A0", red: "#E88080", purple: "#B699E8", teal: "#5CD4BE", coral: "#E89678" };
 const UI = { bg: "#0C0C0B", bg2: "#141413", bg3: "#1C1C1A", bg4: "#252523", border: "#2A2A27", borderLight: "#353532", text: "#F2F1EE", text2: "#B0AFA9", text3: "#706F6A" };
@@ -126,7 +126,7 @@ export default function App() {
   const [partOpen, setPartOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(null);
   const [synced, setSynced] = useState(false);
-  const skipRef = useRef(false);
+  const pollRef = useRef(null);
   const tabRef = useRef(null);
   const [pillStyle, setPillStyle] = useState({});
   // Split tab state
@@ -162,32 +162,19 @@ export default function App() {
     setLoaded(true);
   })(); }, []);
 
+  // Poll for sync (replaces Supabase Realtime)
   useEffect(() => {
-    const unsub = subscribeBalances((payload) => {
-      if (skipRef.current) { skipRef.current = false; return; }
-      if (payload.eventType === "INSERT" || payload.eventType === "UPDATE") {
-        setProgs(prev => { const row = fromDB(payload.new); const exists = prev.find(p => p.id === row.id); return sortProgs(exists ? prev.map(p => p.id === row.id ? row : p) : [...prev, row]); });
-      }
-      if (payload.eventType === "DELETE") setProgs(prev => prev.filter(p => p.id !== payload.old.id));
-    });
-    return unsub;
-  }, []);
-
-  useEffect(() => {
-    const unsub = subscribeTurns((payload) => {
-      if (payload.eventType === "INSERT") setTurns(prev => [payload.new, ...prev].slice(0, 50));
-      if (payload.eventType === "DELETE") setTurns(prev => prev.filter(t => t.id !== payload.old.id));
-    });
-    return unsub;
-  }, []);
-
-  useEffect(() => {
-    const unsub = subscribeGrocery((payload) => {
-      if (payload.eventType === "INSERT") setGrocItems(prev => prev.some(g => g.id === payload.new.id) ? prev : [...prev, payload.new]);
-      if (payload.eventType === "UPDATE") setGrocItems(prev => prev.map(g => g.id === payload.new.id ? payload.new : g));
-      if (payload.eventType === "DELETE") setGrocItems(prev => prev.filter(g => g.id !== payload.old.id));
-    });
-    return unsub;
+    const poll = async () => {
+      if (document.hidden) return;
+      const [balData, turnsData, grocData] = await Promise.all([getBalances(), getTurns(), getGroceryItems()]);
+      if (balData) setProgs(prev => { const next = sortProgs(balData.map(fromDB)); return JSON.stringify(next) === JSON.stringify(prev) ? prev : next; });
+      if (turnsData) setTurns(prev => JSON.stringify(turnsData) === JSON.stringify(prev) ? prev : turnsData);
+      if (grocData) setGrocItems(prev => JSON.stringify(grocData) === JSON.stringify(prev) ? prev : grocData);
+    };
+    pollRef.current = setInterval(poll, 5000);
+    const onVis = () => { if (!document.hidden) poll(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(pollRef.current); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
   // Animated pill - recalculate after font load
@@ -208,13 +195,18 @@ export default function App() {
   const upd = useCallback((id, v) => {
     const val = parseInt(v.replace(/\D/g, "")) || 0;
     const ts = new Date().toISOString();
-    setProgs(prev => { const next = sortProgs(prev.map(x => x.id === id ? { ...x, value: val, updated: ts } : x)); const item = next.find(x => x.id === id); if (item) { skipRef.current = true; upsertBalance(item); } return next; });
+    setProgs(prev => { const next = sortProgs(prev.map(x => x.id === id ? { ...x, value: val, updated: ts } : x)); const item = next.find(x => x.id === id); if (item) upsertBalance(item); return next; });
   }, []);
-  const addP = useCallback(() => { if (!newN.trim()) return; const item = { id: `c-${Date.now()}`, label: newN.trim(), value: 0, color: UI.text2, sys: false, updated: null }; setProgs(prev => sortProgs([...prev, item])); skipRef.current = true; upsertBalance(item); setNewN(""); setAddOpen(false); }, [newN]);
+  const addP = useCallback(() => { if (!newN.trim()) return; const item = { id: `c-${Date.now()}`, label: newN.trim(), value: 0, color: UI.text2, sys: false, updated: null }; setProgs(prev => sortProgs([...prev, item])); upsertBalance(item); setNewN(""); setAddOpen(false); }, [newN]);
   const rm = useCallback((id) => { setProgs(prev => prev.filter(x => x.id !== id)); deleteBalance(id); }, []);
-  const handleLog = useCallback(async (bucket, person) => { await sbLogTurn(bucket, person); }, []);
-  const handleUndo = useCallback(async (bucket) => { const last = turns.find(t => t.bucket === bucket); if (!last) return; await sbDeleteTurn(last.id); }, [turns]);
-  const handleReset = useCallback(async (bucket) => { const ids = turns.filter(t => t.bucket === bucket).map(t => t.id); for (const id of ids) await sbDeleteTurn(id); }, [turns]);
+  const handleLog = useCallback(async (bucket, person) => {
+    const temp = { id: `tmp-${Date.now()}`, bucket, person, paid_at: new Date().toISOString() };
+    setTurns(prev => [temp, ...prev].slice(0, 50));
+    const saved = await sbLogTurn(bucket, person);
+    if (saved) setTurns(prev => prev.map(t => t.id === temp.id ? saved : t));
+  }, []);
+  const handleUndo = useCallback(async (bucket) => { const last = turns.find(t => t.bucket === bucket); if (!last) return; setTurns(prev => prev.filter(t => t.id !== last.id)); await sbDeleteTurn(last.id); }, [turns]);
+  const handleReset = useCallback(async (bucket) => { const ids = turns.filter(t => t.bucket === bucket).map(t => t.id); setTurns(prev => prev.filter(t => t.bucket !== bucket)); for (const id of ids) await sbDeleteTurn(id); }, [turns]);
   const getTurnCounts = (bucket) => { const bt = turns.filter(t => t.bucket === bucket); const eric = bt.filter(t => t.person === "Eric").length; const christine = bt.filter(t => t.person === "Christine").length; return { eric, christine, diff: Math.abs(eric - christine) }; };
   const getNextPerson = (bucket) => { const c = getTurnCounts(bucket); if (c.eric === 0 && c.christine === 0) return null; if (c.eric === c.christine) return null; return c.eric > c.christine ? "Christine" : "Eric"; };
   const getHistory = (bucket) => turns.filter(t => t.bucket === bucket).slice(0, 5);
@@ -223,8 +215,12 @@ export default function App() {
   const handleAddGroc = useCallback(async () => {
     if (!newGrocItem.trim() || submitting) return;
     setSubmitting(true);
-    await addGroceryItem(newGrocItem.trim());
+    const name = newGrocItem.trim();
+    const temp = { id: `tmp-${Date.now()}`, name, checked: false, created_at: new Date().toISOString() };
+    setGrocItems(prev => [...prev, temp]);
     setNewGrocItem("");
+    const saved = await addGroceryItem(name);
+    if (saved) setGrocItems(prev => prev.map(g => g.id === temp.id ? saved : g));
     setSubmitting(false);
   }, [newGrocItem, submitting]);
   const handleToggleGroc = useCallback(async (id, checked) => {
@@ -247,34 +243,17 @@ export default function App() {
     await updateGroceryItem(id, { name: name.trim() });
   }, []);
 
-  // Split tab: subscribe to trips list
-  useEffect(() => {
-    const unsub = subscribeTrips((payload) => {
-      if (payload.eventType === "INSERT") setTrips(prev => prev.some(t => t.id === payload.new.id) ? prev : [payload.new, ...prev]);
-      if (payload.eventType === "DELETE") setTrips(prev => prev.filter(t => t.id !== payload.old.id));
-    });
-    return unsub;
-  }, []);
-
-  // Split tab: load + subscribe to active trip data
+  // Split tab: load active trip data + poll
   useEffect(() => {
     if (!activeTrip) { setTripMembers([]); setTripExpenses([]); return; }
-    (async () => {
+    const load = async () => {
       const [m, e] = await Promise.all([getTripMembers(activeTrip.id), getExpenses(activeTrip.id)]);
-      setTripMembers(m); setTripExpenses(e);
-    })();
-    const unsub = subscribeTripData(activeTrip.id,
-      (p) => {
-        if (p.eventType === "INSERT") setTripMembers(prev => prev.some(m => m.id === p.new.id) ? prev : [...prev, p.new]);
-        if (p.eventType === "DELETE") setTripMembers(prev => prev.filter(m => m.id !== p.old.id));
-      },
-      (p) => {
-        if (p.eventType === "INSERT") setTripExpenses(prev => prev.some(e => e.id === p.new.id) ? prev : [p.new, ...prev]);
-        if (p.eventType === "UPDATE") setTripExpenses(prev => prev.map(e => e.id === p.new.id ? p.new : e));
-        if (p.eventType === "DELETE") setTripExpenses(prev => prev.filter(e => e.id !== p.old.id));
-      }
-    );
-    return unsub;
+      setTripMembers(prev => JSON.stringify(m) === JSON.stringify(prev) ? prev : m);
+      setTripExpenses(prev => JSON.stringify(e) === JSON.stringify(prev) ? prev : e);
+    };
+    load();
+    const iv = setInterval(() => { if (!document.hidden) load(); }, 5000);
+    return () => clearInterval(iv);
   }, [activeTrip]);
 
   const handleCreateTrip = useCallback(async () => {
