@@ -419,8 +419,8 @@ export default function App() {
       {pulling && !pullReleased && <div style={{ position: "fixed", top: 0, left: 0, right: 0, display: "flex", justifyContent: "center", paddingTop: Math.min(pullY, 60), zIndex: 300, pointerEvents: "none" }}>
         <span style={{ fontSize: 10, fontFamily: display, fontWeight: 600, color: pullY >= PULL_THRESHOLD ? C.chase : UI.text3, opacity: Math.min(1, pullY / 40), transition: "color 0.2s" }}>{pullY >= PULL_THRESHOLD ? "Release to sync" : "Pull to sync"}</span>
       </div>}
-      {pullReleased && <div style={{ position: "fixed", top: 0, left: 0, right: 0, display: "flex", justifyContent: "center", paddingTop: 20, zIndex: 300, pointerEvents: "none" }}>
-        <span style={{ fontSize: 10, fontFamily: display, fontWeight: 600, color: pullDone ? C.green : C.chase, opacity: 0.8, transition: "color 0.2s" }}>{pullDone ? "Synced ✓" : "Syncing..."}</span>
+      {pullReleased && <div style={{ position: "fixed", top: 0, left: 0, right: 0, display: "flex", justifyContent: "center", paddingTop: "calc(env(safe-area-inset-top, 20px) + 8px)", zIndex: 300, pointerEvents: "none", background: `linear-gradient(${UI.bg}, transparent)`, paddingBottom: 12 }}>
+        <span style={{ fontSize: 10, fontFamily: display, fontWeight: 600, color: pullDone ? C.green : C.chase, transition: "color 0.2s" }}>{pullDone ? "Synced ✓" : "Syncing..."}</span>
       </div>}
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
       <style>{`
