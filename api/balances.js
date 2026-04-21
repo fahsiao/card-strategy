@@ -11,11 +11,12 @@ export default async function handler(req, res) {
 
     if (req.method === 'PUT') {
       const { id, label, value, color, is_system, updated_at } = req.body
+      const ts = updated_at ? new Date(updated_at) : new Date()
       const row = await db.insert(balances)
-        .values({ id, label, value, color, isSystem: is_system || false, updatedAt: updated_at })
+        .values({ id, label, value, color, isSystem: is_system || false, updatedAt: ts })
         .onConflictDoUpdate({
           target: balances.id,
-          set: { label, value, color, isSystem: is_system || false, updatedAt: updated_at },
+          set: { label, value, color, isSystem: is_system || false, updatedAt: ts },
         })
         .returning()
       return res.json(row[0])

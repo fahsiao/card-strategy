@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const { bucket, person } = req.body
       const row = await db.insert(turns)
-        .values({ bucket, person, paidAt: new Date().toISOString() })
+        .values({ bucket, person })
         .returning()
       const r = row[0]
       return res.json({ id: r.id, bucket: r.bucket, person: r.person, paid_at: r.paidAt })
